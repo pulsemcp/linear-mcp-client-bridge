@@ -247,6 +247,17 @@ Two things to know:
 Smoke runs keep their session id in a separate `state/smoke/` dir, so they never
 disturb the daemon's own conversation or poll cursor.
 
+> **Running on a host where you've used `claude` interactively?** Claude Code
+> remembers MCP OAuth logins per server URL (in `~/.claude/.credentials.json`).
+> If you previously authorized `mcp.linear.app` through the interactive OAuth
+> flow, a *stale* stored token there can shadow the `LINEAR_API_TOKEN` bearer
+> the bridge passes — Claude Code reports the server as `needs-auth` and loads
+> no Linear tools, even with `--strict-mcp-config`. The Docker image is a clean
+> environment, so this never happens in the documented deploy. To reproduce the
+> clean state locally, point the CLI at a throwaway config dir
+> (`CLAUDE_CONFIG_DIR=$(mktemp -d)`) or clear the stale `linear` entry from
+> `mcpOAuth` in `~/.claude/.credentials.json`.
+
 ## Project layout
 
 ```
