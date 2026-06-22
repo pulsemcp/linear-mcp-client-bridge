@@ -180,24 +180,36 @@ export class AgentSession {
 
       let stdout = "";
       let stderr = "";
+      // Settle exactly once: a SIGKILL timeout also fires `close`, and we must
+      // not let the second event overwrite the first outcome.
+      let settled = false;
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        reject(new Error(`claude CLI turn timed out after ${TURN_TIMEOUT_MS / 1000}s`));
+        settle(() => reject(new Error(`claude CLI turn timed out after ${TURN_TIMEOUT_MS / 1000}s`)));
       }, TURN_TIMEOUT_MS);
 
       child.stdout.on("data", (d) => (stdout += d.toString()));
       child.stderr.on("data", (d) => (stderr += d.toString()));
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
+      child.on("error", (err) => settle(() => reject(err)));
       child.on("close", (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve(stdout);
-        else reject(new Error(`claude CLI exited ${code}: ${(stderr || stdout).slice(0, 1000)}`));
+        settle(() =>
+          code === 0
+            ? resolve(stdout)
+            : reject(new Error(`claude CLI exited ${code}: ${(stderr || stdout).slice(0, 1000)}`)),
+        );
       });
 
       // Pass the (untrusted) comment prompt via stdin, never the command line.
+      // If the child has already exited (bad flag, auth failure, …) the pipe is
+      // closed; swallow the resulting EPIPE so it can't crash the daemon — the
+      // `close`/`error` handler above is what reports the failure.
+      child.stdin.on("error", () => {});
       child.stdin.write(prompt);
       child.stdin.end();
     });
