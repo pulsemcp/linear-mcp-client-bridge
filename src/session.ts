@@ -76,6 +76,27 @@ export interface ClaudeResult {
   subtype: string | null;
 }
 
+/**
+ * Build the child environment for the `claude` CLI.
+ *
+ * If an API key is configured we pin it. If not, we deliberately leave the
+ * inherited env untouched so the CLI can fall back to its own login (a Claude
+ * subscription via `claude login`, or an ambient ANTHROPIC_API_KEY) — and we
+ * strip a blank ANTHROPIC_API_KEY so an empty value can't shadow that login.
+ */
+export function buildChildEnv(
+  base: NodeJS.ProcessEnv,
+  apiKey?: string,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  if (apiKey) {
+    env.ANTHROPIC_API_KEY = apiKey;
+  } else if (env.ANTHROPIC_API_KEY !== undefined && env.ANTHROPIC_API_KEY.trim() === "") {
+    delete env.ANTHROPIC_API_KEY;
+  }
+  return env;
+}
+
 /** Parse the single JSON object emitted by `claude --print --output-format json`. */
 export function parseClaudeResult(stdout: string): ClaudeResult {
   const trimmed = stdout.trim();
@@ -172,9 +193,10 @@ export class AgentSession {
     return new Promise((resolve, reject) => {
       const child = spawn(this.claudeBin, args, {
         cwd: this.config.projectRoot,
-        // The CLI reads ANTHROPIC_API_KEY from the environment; the Linear MCP
-        // subprocess inherits it (and LINEAR_API_TOKEN) from here too.
-        env: { ...process.env, ANTHROPIC_API_KEY: this.config.anthropicApiKey },
+        // The CLI reads ANTHROPIC_API_KEY from the environment (or falls back to
+        // its own login when none is set); the Linear MCP subprocess inherits
+        // LINEAR_API_TOKEN from here too.
+        env: buildChildEnv(process.env, this.config.anthropicApiKey),
         stdio: ["pipe", "pipe", "pipe"],
       });
 

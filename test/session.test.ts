@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildClaudeArgs, parseClaudeResult } from "../src/session.js";
+import { buildChildEnv, buildClaudeArgs, parseClaudeResult } from "../src/session.js";
 
 const base = {
   model: "claude-opus-4-8",
@@ -88,4 +88,26 @@ test("parseClaudeResult treats a real auth-failure payload as an error (subtype=
 test("parseClaudeResult throws on empty or non-JSON output", () => {
   assert.throws(() => parseClaudeResult("   "), /no output/);
   assert.throws(() => parseClaudeResult("not json"), /not JSON/);
+});
+
+test("buildChildEnv pins ANTHROPIC_API_KEY when a key is configured", () => {
+  const env = buildChildEnv({ PATH: "/bin" }, "sk-ant-123");
+  assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-123");
+  assert.equal(env.PATH, "/bin");
+});
+
+test("buildChildEnv overrides an inherited key with the configured one", () => {
+  const env = buildChildEnv({ ANTHROPIC_API_KEY: "inherited" }, "sk-ant-pinned");
+  assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-pinned");
+});
+
+test("buildChildEnv leaves an inherited key in place when none is configured", () => {
+  // Lets an ambient ANTHROPIC_API_KEY (or a `claude login`) keep working.
+  const env = buildChildEnv({ ANTHROPIC_API_KEY: "inherited" }, undefined);
+  assert.equal(env.ANTHROPIC_API_KEY, "inherited");
+});
+
+test("buildChildEnv strips a blank inherited key so it can't shadow the CLI login", () => {
+  const env = buildChildEnv({ ANTHROPIC_API_KEY: "   " }, undefined);
+  assert.ok(!("ANTHROPIC_API_KEY" in env));
 });

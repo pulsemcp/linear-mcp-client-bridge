@@ -73,7 +73,8 @@ cd linear-mcp-client-bridge
 
 # 2. Configure secrets
 cp .env.example .env
-$EDITOR .env          # set ANTHROPIC_API_KEY and LINEAR_API_TOKEN
+$EDITOR .env          # set LINEAR_API_TOKEN (and ANTHROPIC_API_KEY, unless the
+                      # host already has a `claude` login to fall back on)
 
 # 3. Build and run
 docker compose up --build -d
@@ -104,7 +105,7 @@ All configuration is environment variables (see `.env.example`):
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | ✅ | — | Anthropic API key. |
+| `ANTHROPIC_API_KEY` | | — | Anthropic API key. Optional: if unset, the bundled `claude` CLI uses the host's own login (a Claude subscription via `claude login`, or an `ANTHROPIC_API_KEY` already in the environment). |
 | `LINEAR_API_TOKEN` | ✅ | — | Linear personal API key (`lin_api_…`). |
 | `POLL_INTERVAL_SECONDS` | | `20` | Seconds between Linear polls. |
 | `AGENT_MODEL` | | `claude-opus-4-8` | Model the agent runs on. |
@@ -213,19 +214,48 @@ npm run dev            # tsx watch
 # or
 npm run build && npm start
 npm run typecheck      # types only
+npm test               # unit tests
 ```
 
 State is written to `./state/` locally (gitignored).
+
+### Test it end to end
+
+`npm run smoke` runs a single real cycle and exits — poll Linear once, pick the
+most recent comment the bridge would answer, run one agent turn, and post the
+reply. It's the fastest way to confirm the whole loop works against a real
+workspace without leaving the daemon running.
+
+```bash
+npm run smoke                       # newest answerable comment in the last 2h
+npm run smoke -- --dry-run          # ...but print the reply instead of posting it
+npm run smoke -- --issue ENG-12     # ...restricted to one issue
+npm run smoke -- --lookback-min 30  # ...change the search window
+```
+
+Two things to know:
+
+- **Auth.** Set `ANTHROPIC_API_KEY` to pin a key, or leave it unset to use the
+  host's own `claude` login. Only `LINEAR_API_TOKEN` is strictly required.
+- **Post the trigger comment as a different user.** The bridge ignores comments
+  authored by its own token, so a comment you post *with the bot's token* won't
+  be answered — comment as yourself (or another user) and the bot replies.
+
+Smoke runs keep their session id in a separate `state/smoke/` dir, so they never
+disturb the daemon's own conversation or poll cursor.
 
 ## Project layout
 
 ```
 src/
   index.ts             poll loop: fetch new comments → run agent → post reply
+  smoke.ts             one-shot end-to-end runner (`npm run smoke`)
   config.ts            environment configuration
   linear.ts            minimal Linear GraphQL client (native fetch)
   linear-mcp-server.ts standalone stdio MCP server exposing Linear to the CLI
   session.ts           spawns `claude -p`, one resumable session (--resume)
+  prompt.ts            builds the per-comment agent prompt (shared)
+  filter.ts            pure comment classification (self/dup/scope/handle)
   state.ts             durable session id + poll cursor
 CLAUDE.md         agent operating rules (incl. security)
 .claude/skills/   bundled skills (strategy-context)

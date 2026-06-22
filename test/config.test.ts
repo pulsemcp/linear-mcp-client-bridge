@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.js";
 
-const REQUIRED = ["ANTHROPIC_API_KEY", "LINEAR_API_TOKEN"];
 const TOUCHED = [
-  ...REQUIRED,
+  "ANTHROPIC_API_KEY",
+  "LINEAR_API_TOKEN",
   "LINEAR_API_URL",
   "AGENT_MODEL",
   "AGENT_PERMISSION_MODE",
@@ -35,9 +35,27 @@ function withEnv(env: Record<string, string>, fn: () => void): void {
   }
 }
 
-test("throws when a required secret is missing", () => {
+test("throws when LINEAR_API_TOKEN is missing", () => {
+  withEnv({ ANTHROPIC_API_KEY: "sk-ant" }, () => {
+    assert.throws(() => loadConfig(), /LINEAR_API_TOKEN/);
+  });
+});
+
+test("ANTHROPIC_API_KEY is optional (falls back to the CLI's own login)", () => {
   withEnv({ LINEAR_API_TOKEN: "lin_api_x" }, () => {
-    assert.throws(() => loadConfig(), /ANTHROPIC_API_KEY/);
+    const c = loadConfig();
+    assert.equal(c.anthropicApiKey, undefined);
+    assert.equal(c.linearApiToken, "lin_api_x");
+  });
+  // A blank value is treated the same as unset.
+  withEnv({ LINEAR_API_TOKEN: "lin_api_x", ANTHROPIC_API_KEY: "   " }, () => {
+    assert.equal(loadConfig().anthropicApiKey, undefined);
+  });
+});
+
+test("captures ANTHROPIC_API_KEY when set", () => {
+  withEnv({ ANTHROPIC_API_KEY: "sk-ant-123", LINEAR_API_TOKEN: "lin_api_x" }, () => {
+    assert.equal(loadConfig().anthropicApiKey, "sk-ant-123");
   });
 });
 

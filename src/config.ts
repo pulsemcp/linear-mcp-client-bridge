@@ -3,13 +3,19 @@ import path from "node:path";
 /**
  * Runtime configuration, read once from the environment.
  *
- * Only two secrets are strictly required: an Anthropic API key (so the agent
- * can think) and a Linear API token (so the bridge can read and write
- * comments). Everything else has a sensible default.
+ * Only one secret is strictly required: a Linear API token (so the bridge can
+ * read and write comments). The Anthropic credential is optional — if no
+ * ANTHROPIC_API_KEY is set, the spawned `claude` CLI uses whatever login the
+ * host already has. Everything else has a sensible default.
  */
 export interface Config {
-  /** Anthropic API key. Passed to the `claude` CLI as ANTHROPIC_API_KEY. */
-  anthropicApiKey: string;
+  /**
+   * Anthropic API key, passed to the `claude` CLI as ANTHROPIC_API_KEY.
+   * Optional: when unset, the spawned CLI falls back to whatever login the host
+   * already has — a Claude subscription via `claude login`, or an
+   * ANTHROPIC_API_KEY already present in the environment. Set it to pin a key.
+   */
+  anthropicApiKey?: string;
   /** Linear personal API key (starts with `lin_api_`). */
   linearApiToken: string;
   /** Linear GraphQL endpoint. */
@@ -93,7 +99,8 @@ export function loadConfig(): Config {
   }
 
   return {
-    anthropicApiKey: required("ANTHROPIC_API_KEY"),
+    // Optional: empty/unset means "let the claude CLI use its own login".
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
     linearApiToken: required("LINEAR_API_TOKEN"),
     linearApiUrl: process.env.LINEAR_API_URL?.trim() || "https://api.linear.app/graphql",
     model: process.env.AGENT_MODEL?.trim() || "claude-opus-4-8",
