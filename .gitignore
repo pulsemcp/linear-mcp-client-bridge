@@ -1,0 +1,29 @@
+# Dependencies & build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Runtime state (session id, poll cursor)
+state/
+data/
+
+# Logs & caches
+*.log
+.npm-cache/
+
+# Editor / OS noise
+.DS_Store
+
+# --- Agent Orchestrator runtime resources (injected per-session, not part of this repo) ---
+# Ignore everything AO drops into .claude/ EXCEPT the skills this project actually ships.
+/.claude/settings.json
+/.claude/settings.local.json
+/.claude/hooks/
+/.claude/skills/wait-for-ci/
+/.claude/skills/author-html-walkthrough/
+/.claude/skills/pr/

@@ -1,0 +1,20 @@
+services:
+  bridge:
+    build: .
+    # Or pull a prebuilt image instead of building:
+    # image: ghcr.io/your-org/linear-mcp-client-bridge:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Defaults shown; override in .env if you like.
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-20}
+      AGENT_MODEL: ${AGENT_MODEL:-claude-opus-4-8}
+      AGENT_PERMISSION_MODE: ${AGENT_PERMISSION_MODE:-bypassPermissions}
+      LINEAR_TEAM_KEYS: ${LINEAR_TEAM_KEYS:-}
+    volumes:
+      # Persists the session id + poll cursor across restarts.
+      - bridge-state:/data
+
+volumes:
+  bridge-state:

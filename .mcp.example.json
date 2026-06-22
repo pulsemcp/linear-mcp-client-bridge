@@ -1,0 +1,27 @@
+{
+  "_comment": "Reference for .mcp.json. Copy the servers you want into .mcp.json. Two common shapes are shown: an MCP gateway/aggregator over HTTP, and a direct stdio server. Anything you add here becomes mcp__<name>__<tool> tools the agent can call. Use ${ENV_VAR} to pull values from the environment.",
+
+  "mcpServers": {
+    "gateway": {
+      "type": "http",
+      "url": "${MCP_AGGREGATOR_URL:-http://localhost:3000/mcp}"
+    },
+
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+
+    "docs": {
+      "type": "http",
+      "url": "${COMPANY_DOCS_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${COMPANY_DOCS_MCP_TOKEN}"
+      }
+    }
+  }
+}
