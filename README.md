@@ -49,9 +49,9 @@ pattern applies.
   servers directly, and Claude can reach your docs, databases, CI, CRM — anything
   with an MCP server.
 - **Behavior is editable.** `CLAUDE.md` is the operating rulebook and
-  `.claude/skills/` holds reusable procedures. A bundled `cross-service-lookup`
-  skill teaches Claude to discover and route questions to the right connected
-  service.
+  `.claude/skills/` holds reusable procedures. A bundled `strategy-context`
+  skill teaches Claude to answer strategy questions about technical work by
+  grounding them in Zoom meeting transcripts and Notion documentation.
 
 ## Prerequisites
 
@@ -166,9 +166,11 @@ in `.env`, not in the committed file. Anything you add shows up to Claude as
 - **`CLAUDE.md`** — the always-on rulebook: tone, what to do, and the security
   rules. Edit it to fit your team.
 - **`.claude/skills/`** — reusable procedures Claude pulls in on demand. The
-  included `cross-service-lookup` skill shows the pattern: discover which
-  connected MCP server can answer a ticket, query it, and reply with sources.
-  Add your own skill folders (each is a `SKILL.md` with `name` + `description`
+  included `strategy-context` skill shows the pattern: when a ticket asks a
+  strategy question about technical work, ground the answer in Zoom meeting
+  transcripts and Notion docs (reached through the aggregator), then reply with
+  dated sources. Add your own skill folders (each is a `SKILL.md` with
+  `name` + `description`
   frontmatter) for runbooks specific to your workspace.
 
 ## Security — read before deploying
@@ -226,7 +228,7 @@ src/
   session.ts           spawns `claude -p`, one resumable session (--resume)
   state.ts             durable session id + poll cursor
 CLAUDE.md         agent operating rules (incl. security)
-.claude/skills/   bundled skills (cross-service-lookup)
+.claude/skills/   bundled skills (strategy-context)
 .mcp.json         MCP servers the agent can use (edit to extend)
 .mcp.example.json reference configs to copy from
 Dockerfile        non-root container

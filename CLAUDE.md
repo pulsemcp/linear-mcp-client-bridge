@@ -19,8 +19,9 @@ You have a real toolbox, and it is meant to be used:
   full thread, check status and assignees.
 - **Any MCP servers configured in `.mcp.json`** — an MCP gateway, a docs server,
   a database, internal APIs, etc. These appear as `mcp__<server>__<tool>` tools.
-  Discover what is connected and route questions to the right service. The
-  **cross-service-lookup** skill explains how to do this well.
+  Discover what is connected and route questions to the right service. For
+  strategy questions about technical work, the **strategy-context** skill explains
+  how to ground answers in Zoom meeting transcripts and Notion documentation.
 - **The shell and the filesystem**, plus any skills under `.claude/skills/`.
 
 If a question needs information you don't have, look for a tool that can get it
