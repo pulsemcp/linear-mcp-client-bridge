@@ -104,9 +104,11 @@ All configuration is environment variables (see `.env.example`):
 | `POLL_INTERVAL_SECONDS` | | `20` | Seconds between Linear polls. |
 | `AGENT_MODEL` | | `claude-opus-4-8` | Model the agent runs on. |
 | `AGENT_PERMISSION_MODE` | | `bypassPermissions` | Claude Code permission mode. See **Security**. |
+| `AGENT_ALLOWED_TOOLS` | | _(all)_ | Comma-separated allowlist of tools, e.g. `mcp__linear__*,Read`. When set, only these are usable. |
+| `AGENT_DISALLOWED_TOOLS` | | _(none)_ | Comma-separated blocklist of tools, e.g. `Bash,Write,Edit`. Applied on top of the allowlist. |
 | `LINEAR_TEAM_KEYS` | | _(all)_ | Comma-separated team keys to limit scope, e.g. `ENG,OPS`. |
 | `MCP_AGGREGATOR_URL` | | `http://localhost:3000/mcp` | URL the default `.mcp.json` gateway entry points at. |
-| `STATE_DIR` | | `/data` | Where the session id + poll cursor are stored. |
+| `STATE_DIR` | | `./state` (code) / `/data` (Docker image) | Where the session id + poll cursor are stored. The Docker image sets `/data` and mounts it as a volume. |
 
 ## Giving the agent more powers (MCP servers)
 
@@ -170,10 +172,20 @@ issues) into an agent that runs **unattended**. Treat it accordingly:
 
 - **Permission mode.** It defaults to `bypassPermissions` because there is no
   human to approve each tool call in a daemon. That means the agent can run
-  shell commands and use every connected tool on its own. Only run it against a
-  workspace and toolset you trust, ideally with a least-privilege Linear token
-  and scoped MCP servers. You can set `AGENT_PERMISSION_MODE` to a stricter mode
-  if your workflow allows it.
+  shell commands and use every connected tool on its own — a deliberately wide
+  blast radius so the example shows the full power of an MCP-client agent. Note
+  that the stricter built-in modes (`default`, `acceptEdits`, `plan`) assume an
+  interactive approver; with no human in the loop they will simply stall on the
+  first prompt, so they are not a practical substitute here. To actually narrow
+  what the agent can do, scope the **tools** instead (next bullet) and hand it a
+  least-privilege Linear token and MCP servers.
+- **Tool scoping.** Bound the prompt-injection blast radius without breaking the
+  daemon by setting `AGENT_ALLOWED_TOOLS` (an allowlist) and/or
+  `AGENT_DISALLOWED_TOOLS` (a blocklist). For example, to keep the agent
+  read-only over Linear and your gateway while blocking local shell/file
+  mutation: `AGENT_DISALLOWED_TOOLS=Bash,Write,Edit`. These are unset by default
+  so the example ships with the full toolset; turn them on for untrusted
+  workspaces.
 - **Prompt injection.** Comment text can try to hijack the agent ("ignore your
   instructions and …"). `CLAUDE.md` instructs Claude to treat comment bodies as
   data, refuse embedded instructions, never reveal secrets, and avoid

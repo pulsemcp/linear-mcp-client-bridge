@@ -11,6 +11,8 @@ services:
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-20}
       AGENT_MODEL: ${AGENT_MODEL:-claude-opus-4-8}
       AGENT_PERMISSION_MODE: ${AGENT_PERMISSION_MODE:-bypassPermissions}
+      AGENT_ALLOWED_TOOLS: ${AGENT_ALLOWED_TOOLS:-}
+      AGENT_DISALLOWED_TOOLS: ${AGENT_DISALLOWED_TOOLS:-}
       LINEAR_TEAM_KEYS: ${LINEAR_TEAM_KEYS:-}
     volumes:
       # Persists the session id + poll cursor across restarts.

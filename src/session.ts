@@ -46,6 +46,11 @@ export class AgentSession {
         // createSdkMcpServer() already returns a { type: "sdk", ... } config.
         linear: createLinearMcpServer(this.linear),
       },
+      // Optional tool scoping to bound prompt-injection blast radius. Unset by
+      // default (full Claude Code toolset); set AGENT_DISALLOWED_TOOLS or
+      // AGENT_ALLOWED_TOOLS for untrusted workspaces. See README "Security".
+      ...(this.config.allowedTools.length ? { allowedTools: this.config.allowedTools } : {}),
+      ...(this.config.disallowedTools.length ? { disallowedTools: this.config.disallowedTools } : {}),
       ...(resume ? { resume } : {}),
     };
 

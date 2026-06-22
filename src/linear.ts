@@ -20,22 +20,77 @@ export interface LinearComment {
   teamKey: string | null;
 }
 
+/** Raw shape of a comment node as returned by the GraphQL query below. */
+export interface CommentNode {
+  id: string;
+  body: string;
+  createdAt: string;
+  url: string;
+  user: { id: string; name: string; displayName: string } | null;
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+    url: string;
+    team: { key: string } | null;
+  } | null;
+}
+
+/** Pure mapper from a GraphQL comment node to our flat LinearComment. */
+export function mapCommentNode(n: CommentNode): LinearComment {
+  return {
+    id: n.id,
+    body: n.body,
+    createdAt: n.createdAt,
+    url: n.url,
+    authorId: n.user?.id ?? null,
+    authorName: n.user?.displayName || n.user?.name || "Unknown",
+    issueId: n.issue!.id,
+    issueIdentifier: n.issue!.identifier,
+    issueTitle: n.issue!.title,
+    issueUrl: n.issue!.url,
+    teamKey: n.issue!.team?.key ?? null,
+  };
+}
+
 interface GraphQLResponse<T> {
   data?: T;
   errors?: Array<{ message: string }>;
 }
 
+/** One page of the paginated comments query. */
+interface CommentsPage {
+  comments: {
+    nodes: CommentNode[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+/** Minimal subset of `fetch` we depend on — swappable in tests. */
+export type FetchLike = (url: string, init: RequestInit) => Promise<{
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+  json: () => Promise<unknown>;
+}>;
+
+// Drain at most this many pages per poll (50 comments/page). A backstop against
+// runaway pagination; far above any realistic per-interval comment volume.
+const MAX_PAGES = 50;
+
 export class LinearClient {
   private readonly url: string;
   private readonly token: string;
+  private readonly fetchImpl: FetchLike;
 
-  constructor(config: Config) {
+  constructor(config: Config, fetchImpl?: FetchLike) {
     this.url = config.linearApiUrl;
     this.token = config.linearApiToken;
+    this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
   }
 
   private async request<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-    const res = await fetch(this.url, {
+    const res = await this.fetchImpl(this.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -68,13 +123,27 @@ export class LinearClient {
     return data.viewer;
   }
 
-  /** Comments created strictly after `sinceIso`, oldest first. */
+  /**
+   * Every issue comment created at or after `sinceIso`, returned oldest-first.
+   *
+   * We drain ALL pages rather than trusting a single page. Linear's default
+   * page ordering is not contractually fixed, so a single capped page after a
+   * burst or downtime could return the wrong end of the range and silently
+   * strip unprocessed comments (the cursor would then advance past them). By
+   * draining every page and sorting ascending ourselves, the result is correct
+   * regardless of Linear's internal order. The `gte` filter (paired with the
+   * caller's processed-id dedup) means a comment sharing the exact millisecond
+   * of the cursor is re-seen rather than skipped after a restart. Since the
+   * filter restricts to new comments, the set is small in steady state and
+   * pagination terminates in one page.
+   */
   async fetchCommentsSince(sinceIso: string): Promise<LinearComment[]> {
     const query = `
-      query NewComments($since: DateTimeOrDuration!) {
+      query NewComments($since: DateTimeOrDuration!, $after: String) {
         comments(
-          filter: { createdAt: { gt: $since } }
+          filter: { createdAt: { gte: $since } }
           first: 50
+          after: $after
           orderBy: createdAt
         ) {
           nodes {
@@ -91,43 +160,35 @@ export class LinearClient {
               team { key }
             }
           }
+          pageInfo { hasNextPage endCursor }
         }
       }
     `;
-    const data = await this.request<{
-      comments: {
-        nodes: Array<{
-          id: string;
-          body: string;
-          createdAt: string;
-          url: string;
-          user: { id: string; name: string; displayName: string } | null;
-          issue: {
-            id: string;
-            identifier: string;
-            title: string;
-            url: string;
-            team: { key: string } | null;
-          } | null;
-        }>;
-      };
-    }>(query, { since: sinceIso });
 
-    return data.comments.nodes
+    const nodes: CommentNode[] = [];
+    let after: string | null = null;
+    let truncated = false;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data: CommentsPage = await this.request<CommentsPage>(query, { since: sinceIso, after });
+
+      nodes.push(...data.comments.nodes);
+      if (!data.comments.pageInfo.hasNextPage) break;
+      after = data.comments.pageInfo.endCursor;
+      if (after == null) break;
+      if (page === MAX_PAGES - 1) truncated = true;
+    }
+    if (truncated) {
+      // Far beyond any realistic per-poll volume, but never hide a cap: an
+      // operator seeing this should shorten the poll interval or raise MAX_PAGES.
+      console.warn(
+        `[linear] fetchCommentsSince hit the ${MAX_PAGES}-page cap; some new comments were not fetched this cycle.`,
+      );
+    }
+
+    return nodes
       .filter((n) => n.issue != null)
-      .map((n) => ({
-        id: n.id,
-        body: n.body,
-        createdAt: n.createdAt,
-        url: n.url,
-        authorId: n.user?.id ?? null,
-        authorName: n.user?.displayName || n.user?.name || "Unknown",
-        issueId: n.issue!.id,
-        issueIdentifier: n.issue!.identifier,
-        issueTitle: n.issue!.title,
-        issueUrl: n.issue!.url,
-        teamKey: n.issue!.team?.key ?? null,
-      }));
+      .map(mapCommentNode)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   /** Post a comment back onto an issue. Returns the new comment URL. */

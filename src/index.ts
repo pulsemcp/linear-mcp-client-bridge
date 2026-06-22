@@ -2,6 +2,7 @@ import { loadConfig } from "./config.js";
 import { LinearClient, type LinearComment } from "./linear.js";
 import { StateStore } from "./state.js";
 import { AgentSession } from "./session.js";
+import { classifyComment } from "./filter.js";
 
 function log(...args: unknown[]): void {
   console.log(`[${new Date().toISOString()}]`, ...args);
@@ -9,6 +10,29 @@ function log(...args: unknown[]): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Linear comment bodies have a practical size limit; keep replies well under it.
+const MAX_REPLY_CHARS = 60_000;
+
+function capReply(reply: string): string {
+  if (reply.length <= MAX_REPLY_CHARS) return reply;
+  return reply.slice(0, MAX_REPLY_CHARS - 40) + "\n\n…(reply truncated)";
+}
+
+/** Retry a startup call a few times so a brief Linear blip doesn't kill boot. */
+async function withStartupRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      log(`! ${label} failed (attempt ${attempt}/5):`, err);
+      if (attempt < 5) await sleep(3000 * attempt);
+    }
+  }
+  throw lastErr;
 }
 
 /** Build the per-comment prompt handed to the agent. */
@@ -35,7 +59,7 @@ async function main(): Promise<void> {
   process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
 
   const linear = new LinearClient(config);
-  const viewer = await linear.getViewer();
+  const viewer = await withStartupRetry("Linear auth", () => linear.getViewer());
   log(`Authenticated with Linear as "${viewer.name}" (${viewer.id}).`);
 
   const state = await StateStore.load(config.stateDir, new Date().toISOString());
@@ -64,13 +88,16 @@ async function main(): Promise<void> {
 
       for (const comment of comments) {
         if (!running) break;
-        if (comment.authorId === viewer.id) {
-          // Our own reply — never react to ourselves.
-          await state.markProcessed(comment.id, comment.createdAt);
-          continue;
-        }
-        if (state.alreadyProcessed(comment.id)) continue;
-        if (config.teamKeys.length && (!comment.teamKey || !config.teamKeys.includes(comment.teamKey))) {
+
+        const decision = classifyComment(
+          comment,
+          viewer.id,
+          config.teamKeys,
+          (id) => state.alreadyProcessed(id),
+        );
+        if (decision === "duplicate") continue;
+        if (decision === "self" || decision === "out-of-scope") {
+          // Nothing to answer, but record it so the cursor advances past it.
           await state.markProcessed(comment.id, comment.createdAt);
           continue;
         }
@@ -79,7 +106,7 @@ async function main(): Promise<void> {
         try {
           const reply = await agent.run(buildPrompt(comment));
           if (reply) {
-            const url = await linear.createComment(comment.issueId, reply);
+            const url = await linear.createComment(comment.issueId, capReply(reply));
             log(`← Replied on ${comment.issueIdentifier}: ${url}`);
           } else {
             log(`← Agent produced no reply for ${comment.issueIdentifier}; skipping.`);
