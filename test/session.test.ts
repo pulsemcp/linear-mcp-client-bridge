@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildChildEnv, buildClaudeArgs, parseClaudeResult } from "../src/session.js";
+import {
+  buildChildEnv,
+  buildClaudeArgs,
+  buildLinearMcpConfig,
+  parseClaudeResult,
+} from "../src/session.js";
 
 const base = {
   model: "claude-opus-4-8",
@@ -110,4 +115,21 @@ test("buildChildEnv leaves an inherited key in place when none is configured", (
 test("buildChildEnv strips a blank inherited key so it can't shadow the CLI login", () => {
   const env = buildChildEnv({ ANTHROPIC_API_KEY: "   " }, undefined);
   assert.ok(!("ANTHROPIC_API_KEY" in env));
+});
+
+test("buildLinearMcpConfig points at the official server with a bearer placeholder, not the literal token", () => {
+  const json = buildLinearMcpConfig("https://mcp.linear.app/mcp");
+  const parsed = JSON.parse(json);
+  const linear = parsed.mcpServers.linear;
+  assert.equal(linear.type, "http");
+  assert.equal(linear.url, "https://mcp.linear.app/mcp");
+  // The token is referenced as an env placeholder the CLI expands at load time —
+  // it must never be inlined here (would leak it onto argv / to disk).
+  assert.equal(linear.headers.Authorization, "Bearer ${LINEAR_API_TOKEN}");
+  assert.ok(!json.includes("lin_api_"));
+});
+
+test("buildLinearMcpConfig honours a custom URL (proxy / SSE endpoint)", () => {
+  const parsed = JSON.parse(buildLinearMcpConfig("https://proxy.example/mcp"));
+  assert.equal(parsed.mcpServers.linear.url, "https://proxy.example/mcp");
 });

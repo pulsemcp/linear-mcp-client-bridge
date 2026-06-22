@@ -40,10 +40,12 @@ pattern applies.
   single Claude Code conversation (via `--resume`). Ticket #42 can be answered
   with what Claude learned on ticket #7. The session id is persisted, so restarts
   and redeploys keep the thread.
-- **Linear is a built-in tool.** The bridge ships a small stdio MCP server that
-  exposes `get_issue`, `search_issues`, `list_my_issues`, and `post_comment`. The
-  CLI launches it automatically (via `--mcp-config`), reusing the token you
-  already set — no extra container.
+- **Linear is a built-in tool.** The agent gets its Linear tools from Linear's
+  own [official hosted MCP server](https://linear.app/docs/mcp)
+  (`https://mcp.linear.app/mcp`), wired in via `--mcp-config`. The same
+  `LINEAR_API_TOKEN` is sent as a bearer credential, so there's no extra
+  container to run and the tool surface always tracks Linear's own. (Point
+  `LINEAR_MCP_URL` at a proxy or the legacy `/sse` endpoint to override.)
 - **You bring the rest.** Point `.mcp.json` at an
   [MCP gateway/aggregator](https://github.com/domdomegg/mcp-aggregator) or list
   servers directly, and Claude can reach your docs, databases, CI, CRM — anything
@@ -106,7 +108,8 @@ All configuration is environment variables (see `.env.example`):
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | | — | Anthropic API key. Optional: if unset, the bundled `claude` CLI uses the host's own login (a Claude subscription via `claude login`, or an `ANTHROPIC_API_KEY` already in the environment). |
-| `LINEAR_API_TOKEN` | ✅ | — | Linear personal API key (`lin_api_…`). |
+| `LINEAR_API_TOKEN` | ✅ | — | Linear personal API key (`lin_api_…`). Drives the poll loop *and* is sent as the bearer credential to Linear's MCP server. |
+| `LINEAR_MCP_URL` | | `https://mcp.linear.app/mcp` | Linear's hosted MCP server, giving the agent its Linear tools. Override only for a proxy or the legacy `/sse` endpoint. |
 | `POLL_INTERVAL_SECONDS` | | `20` | Seconds between Linear polls. |
 | `AGENT_MODEL` | | `claude-opus-4-8` | Model the agent runs on. |
 | `AGENT_PERMISSION_MODE` | | `bypassPermissions` | Claude Code permission mode. See **Security**. |
@@ -252,8 +255,8 @@ src/
   smoke.ts             one-shot end-to-end runner (`npm run smoke`)
   config.ts            environment configuration
   linear.ts            minimal Linear GraphQL client (native fetch)
-  linear-mcp-server.ts standalone stdio MCP server exposing Linear to the CLI
-  session.ts           spawns `claude -p`, one resumable session (--resume)
+  session.ts           spawns `claude -p`, one resumable session (--resume);
+                       writes the Linear MCP config (official hosted server)
   prompt.ts            builds the per-comment agent prompt (shared)
   filter.ts            pure comment classification (self/dup/scope/handle)
   state.ts             durable session id + poll cursor

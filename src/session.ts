@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Config } from "./config.js";
 import type { StateStore } from "./state.js";
@@ -22,8 +21,9 @@ const TURN_TIMEOUT_MS = 5 * 60 * 1000;
  * memory is the whole point — ticket #42 can be answered with what it learned on
  * ticket #7.
  *
- * Linear is exposed to the agent as a stdio MCP server (`linear-mcp-server.ts`)
- * launched by the CLI via `--mcp-config`, alongside the operator's `.mcp.json`.
+ * Linear tools are provided to the agent by Linear's official hosted MCP server
+ * (`https://mcp.linear.app/mcp`), wired in via `--mcp-config` alongside the
+ * operator's `.mcp.json`.
  */
 
 export interface ClaudeArgsInput {
@@ -127,25 +127,36 @@ function resolveClaudeBin(): string {
 }
 
 /**
- * How to launch the Linear stdio MCP server. When this module runs compiled
- * (dist/session.js) the sibling is plain JS; under `tsx` (dev) it's TypeScript
- * and needs the tsx loader.
+ * The MCP config that points the agent at Linear's official hosted server.
+ *
+ * The Linear token is sent as a bearer credential, but written as a literal
+ * `${LINEAR_API_TOKEN}` placeholder: the `claude` CLI expands it from the child
+ * env when it loads the config, so the real token never lands on the command
+ * line nor in this file on disk. Pure (no I/O) so it can be unit-tested.
  */
-function linearServerLaunch(): { command: string; args: string[] } {
-  const isTs = import.meta.url.endsWith(".ts");
-  const serverPath = fileURLToPath(new URL(`./linear-mcp-server.${isTs ? "ts" : "js"}`, import.meta.url));
-  return isTs
-    ? { command: process.execPath, args: ["--import", "tsx", serverPath] }
-    : { command: process.execPath, args: [serverPath] };
+export function buildLinearMcpConfig(url: string): string {
+  return JSON.stringify({
+    mcpServers: {
+      linear: {
+        type: "http",
+        url,
+        headers: { Authorization: "Bearer ${LINEAR_API_TOKEN}" },
+      },
+    },
+  });
 }
 
-/** The MCP configs to hand the CLI: our Linear server + the project .mcp.json. */
+/**
+ * The MCP configs to hand the CLI: the official Linear server + the operator's
+ * project .mcp.json. We write the Linear config to a file (placeholder only,
+ * no secret) under the state dir and pass it by path — the form the CLI
+ * reliably env-expands, and the same mechanism the project .mcp.json relies on.
+ */
 function buildMcpConfigs(config: Config): string[] {
-  const { command, args } = linearServerLaunch();
-  const linear = JSON.stringify({
-    mcpServers: { linear: { type: "stdio", command, args } },
-  });
-  const configs = [linear];
+  mkdirSync(config.stateDir, { recursive: true });
+  const linearPath = path.join(config.stateDir, "linear-mcp.json");
+  writeFileSync(linearPath, buildLinearMcpConfig(config.linearMcpUrl));
+  const configs = [linearPath];
   const projectMcp = path.join(config.projectRoot, ".mcp.json");
   if (existsSync(projectMcp)) configs.push(projectMcp);
   return configs;
@@ -194,8 +205,8 @@ export class AgentSession {
       const child = spawn(this.claudeBin, args, {
         cwd: this.config.projectRoot,
         // The CLI reads ANTHROPIC_API_KEY from the environment (or falls back to
-        // its own login when none is set); the Linear MCP subprocess inherits
-        // LINEAR_API_TOKEN from here too.
+        // its own login when none is set), and expands the ${LINEAR_API_TOKEN}
+        // placeholder in the Linear MCP config from this same env.
         env: buildChildEnv(process.env, this.config.anthropicApiKey),
         stdio: ["pipe", "pipe", "pipe"],
       });

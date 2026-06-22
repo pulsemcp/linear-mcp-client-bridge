@@ -18,8 +18,14 @@ export interface Config {
   anthropicApiKey?: string;
   /** Linear personal API key (starts with `lin_api_`). */
   linearApiToken: string;
-  /** Linear GraphQL endpoint. */
+  /** Linear GraphQL endpoint — used by the daemon's own poll loop. */
   linearApiUrl: string;
+  /**
+   * Linear's official hosted MCP server, given to the agent so it has Linear
+   * tools. The same `linearApiToken` is sent as a bearer credential. Override
+   * only to point at a proxy or the legacy SSE endpoint.
+   */
+  linearMcpUrl: string;
   /** Model the agent runs on. */
   model: string;
   /** Claude Code permission mode. See README "Security" before changing. */
@@ -70,20 +76,8 @@ function required(name: string): string {
   return value.trim();
 }
 
-/** Just the bits a Linear API client needs. */
+/** Just the bits the daemon's Linear GraphQL client needs. */
 export type LinearConfig = Pick<Config, "linearApiUrl" | "linearApiToken">;
-
-/**
- * Minimal config for the standalone Linear MCP server (`linear-mcp-server.ts`),
- * which the `claude` CLI spawns as a subprocess. It only talks to Linear, so it
- * deliberately does NOT require ANTHROPIC_API_KEY — unlike the full daemon.
- */
-export function loadLinearConfig(): LinearConfig {
-  return {
-    linearApiToken: required("LINEAR_API_TOKEN"),
-    linearApiUrl: process.env.LINEAR_API_URL?.trim() || "https://api.linear.app/graphql",
-  };
-}
 
 export function loadConfig(): Config {
   const projectRoot = process.env.PROJECT_ROOT
@@ -103,6 +97,7 @@ export function loadConfig(): Config {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
     linearApiToken: required("LINEAR_API_TOKEN"),
     linearApiUrl: process.env.LINEAR_API_URL?.trim() || "https://api.linear.app/graphql",
+    linearMcpUrl: process.env.LINEAR_MCP_URL?.trim() || "https://mcp.linear.app/mcp",
     model: process.env.AGENT_MODEL?.trim() || "claude-opus-4-8",
     permissionMode,
     allowedTools: splitList(process.env.AGENT_ALLOWED_TOOLS),
