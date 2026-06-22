@@ -20,7 +20,7 @@ pattern applies.
          │  workspace   │                 │                            │
          │              │◀─────────────── │  • polls Linear            │
          └──────────────┘   posts reply   │  • one persistent Claude    │
-                                          │    Agent session (memory)   │
+                                          │    Code session (memory)    │
                                           │  • CLAUDE.md + skills       │
                                           └─────────────┬──────────────┘
                                                         │ MCP
@@ -32,13 +32,18 @@ pattern applies.
 
 ## How it works
 
+- **It's the Claude Code CLI under the hood.** Each turn shells out to
+  `claude -p` (headless print mode) — the same binary you run locally — so you get
+  Claude Code's native system prompt, CLAUDE.md discovery, skills, and MCP client
+  for free. No SDK, no bespoke agent loop.
 - **One session, shared memory.** Every comment is handled as the next turn in a
-  single Claude Agent SDK conversation (via session `resume`). Ticket #42 can be
-  answered with what Claude learned on ticket #7. The session id is persisted, so
-  restarts and redeploys keep the thread.
-- **Linear is a built-in tool.** The bridge exposes `get_issue`,
-  `search_issues`, `list_my_issues`, and `post_comment` to Claude as an
-  in-process MCP server — no extra container, reusing the token you already set.
+  single Claude Code conversation (via `--resume`). Ticket #42 can be answered
+  with what Claude learned on ticket #7. The session id is persisted, so restarts
+  and redeploys keep the thread.
+- **Linear is a built-in tool.** The bridge ships a small stdio MCP server that
+  exposes `get_issue`, `search_issues`, `list_my_issues`, and `post_comment`. The
+  CLI launches it automatically (via `--mcp-config`), reusing the token you
+  already set — no extra container.
 - **You bring the rest.** Point `.mcp.json` at an
   [MCP gateway/aggregator](https://github.com/domdomegg/mcp-aggregator) or list
   servers directly, and Claude can reach your docs, databases, CI, CRM — anything
@@ -109,6 +114,7 @@ All configuration is environment variables (see `.env.example`):
 | `LINEAR_TEAM_KEYS` | | _(all)_ | Comma-separated team keys to limit scope, e.g. `ENG,OPS`. |
 | `MCP_AGGREGATOR_URL` | | `http://localhost:3000/mcp` | URL the default `.mcp.json` gateway entry points at. |
 | `STATE_DIR` | | `./state` (code) / `/data` (Docker image) | Where the session id + poll cursor are stored. The Docker image sets `/data` and mounts it as a volume. |
+| `CLAUDE_BIN` | | _(bundled)_ | Path to the `claude` binary. Defaults to the one bundled with the `@anthropic-ai/claude-code` dependency; override only if you want a different CLI build. |
 
 ## Giving the agent more powers (MCP servers)
 
@@ -213,12 +219,12 @@ State is written to `./state/` locally (gitignored).
 
 ```
 src/
-  index.ts        poll loop: fetch new comments → run agent → post reply
-  config.ts       environment configuration
-  linear.ts       minimal Linear GraphQL client (native fetch)
-  linear-tools.ts in-process MCP server exposing Linear to the agent
-  session.ts      Claude Agent SDK wrapper — one resumable session
-  state.ts        durable session id + poll cursor
+  index.ts             poll loop: fetch new comments → run agent → post reply
+  config.ts            environment configuration
+  linear.ts            minimal Linear GraphQL client (native fetch)
+  linear-mcp-server.ts standalone stdio MCP server exposing Linear to the CLI
+  session.ts           spawns `claude -p`, one resumable session (--resume)
+  state.ts             durable session id + poll cursor
 CLAUDE.md         agent operating rules (incl. security)
 .claude/skills/   bundled skills (cross-service-lookup)
 .mcp.json         MCP servers the agent can use (edit to extend)

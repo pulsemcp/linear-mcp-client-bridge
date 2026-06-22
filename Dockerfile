@@ -18,14 +18,14 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-# Production dependencies only (includes the Claude Agent SDK + Claude Code CLI).
+# Production dependencies only (includes the Claude Code CLI we shell out to).
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # Compiled bridge.
 COPY --from=build /app/dist ./dist
 
-# Agent configuration the SDK loads from the project root at runtime.
+# Agent configuration the CLI loads from the project root at runtime.
 COPY CLAUDE.md .mcp.json ./
 COPY .claude ./.claude
 

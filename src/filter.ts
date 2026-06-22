@@ -12,7 +12,7 @@ export type CommentDecision = "self" | "duplicate" | "out-of-scope" | "handle";
 
 /**
  * Pure classification of a comment, factored out of the poll loop so the
- * skip/dedup/team-scope rules can be tested without the Agent SDK or network.
+ * skip/dedup/team-scope rules can be tested without the CLI or network.
  *
  * Order matters: the self-check runs first (we must drop our own replies even
  * if somehow unprocessed), then the dedup check, then team scoping.

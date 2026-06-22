@@ -55,8 +55,6 @@ function buildPrompt(c: LinearComment): string {
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  // The Agent SDK reads ANTHROPIC_API_KEY from the environment.
-  process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
 
   const linear = new LinearClient(config);
   const viewer = await withStartupRetry("Linear auth", () => linear.getViewer());
@@ -68,7 +66,7 @@ async function main(): Promise<void> {
     log(`Restricted to teams: ${config.teamKeys.join(", ")}.`);
   }
 
-  const agent = new AgentSession(config, linear, state);
+  const agent = new AgentSession(config, state);
 
   let running = true;
   const stop = (signal: string) => {

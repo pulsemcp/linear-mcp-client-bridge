@@ -1,4 +1,4 @@
-import type { Config } from "./config.js";
+import type { LinearConfig } from "./config.js";
 
 /**
  * A tiny Linear GraphQL client built on the global `fetch`. We deliberately
@@ -83,7 +83,7 @@ export class LinearClient {
   private readonly token: string;
   private readonly fetchImpl: FetchLike;
 
-  constructor(config: Config, fetchImpl?: FetchLike) {
+  constructor(config: LinearConfig, fetchImpl?: FetchLike) {
     this.url = config.linearApiUrl;
     this.token = config.linearApiToken;
     this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);

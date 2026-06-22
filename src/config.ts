@@ -8,7 +8,7 @@ import path from "node:path";
  * comments). Everything else has a sensible default.
  */
 export interface Config {
-  /** Anthropic API key. The Agent SDK reads ANTHROPIC_API_KEY directly too. */
+  /** Anthropic API key. Passed to the `claude` CLI as ANTHROPIC_API_KEY. */
   anthropicApiKey: string;
   /** Linear personal API key (starts with `lin_api_`). */
   linearApiToken: string;
@@ -43,8 +43,15 @@ function splitList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** The permission modes Claude Code accepts; we fail fast on anything else. */
-const PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan"] as const;
+/** The permission modes the `claude` CLI accepts; we fail fast on anything else. */
+const PERMISSION_MODES = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "auto",
+  "dontAsk",
+] as const;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -55,6 +62,21 @@ function required(name: string): string {
     );
   }
   return value.trim();
+}
+
+/** Just the bits a Linear API client needs. */
+export type LinearConfig = Pick<Config, "linearApiUrl" | "linearApiToken">;
+
+/**
+ * Minimal config for the standalone Linear MCP server (`linear-mcp-server.ts`),
+ * which the `claude` CLI spawns as a subprocess. It only talks to Linear, so it
+ * deliberately does NOT require ANTHROPIC_API_KEY — unlike the full daemon.
+ */
+export function loadLinearConfig(): LinearConfig {
+  return {
+    linearApiToken: required("LINEAR_API_TOKEN"),
+    linearApiUrl: process.env.LINEAR_API_URL?.trim() || "https://api.linear.app/graphql",
+  };
 }
 
 export function loadConfig(): Config {
