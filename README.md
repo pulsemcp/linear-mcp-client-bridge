@@ -176,6 +176,12 @@ in `.env`, not in the committed file. Anything you add shows up to Claude as
   dated sources. Add your own skill folders (each is a `SKILL.md` with
   `name` + `description`
   frontmatter) for runbooks specific to your workspace.
+- **`sentinel-check`** — a bundled live demo / self-test skill. Comment
+  *"run the sentinel check"* on any ticket and the agent loads the skill, reads
+  an unguessable pass-phrase off disk, and replies with it — proof that a real
+  `claude` agent (not a canned response) handled the comment. Ask it to also
+  fetch the issue title and one reply exercises both halves of the loop: local
+  skill loading **and** the official hosted Linear MCP server.
 
 ## Security — read before deploying
 
@@ -272,7 +278,7 @@ src/
   filter.ts            pure comment classification (self/dup/scope/handle)
   state.ts             durable session id + poll cursor
 CLAUDE.md         agent operating rules (incl. security)
-.claude/skills/   bundled skills (strategy-context)
+.claude/skills/   bundled skills (strategy-context, sentinel-check demo)
 .mcp.json         MCP servers the agent can use (edit to extend)
 .mcp.example.json reference configs to copy from
 Dockerfile        non-root container
