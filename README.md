@@ -15,7 +15,7 @@ turns a SaaS comment stream into an agent with memory, skills, and access to
 every system you expose over MCP. Swap Linear for your own service and the same
 pattern applies.
 
-https://storage.googleapis.com/pulse_public/posts/effective-patterns-for-advanced-mcp-usage/linear-mcp-client-bridge-demo.mp4
+https://github.com/user-attachments/assets/6d309c2e-b05b-4fdf-bde7-3c633438b9c6
 
 - **Split screen:** a Linear issue on the left; the bridge's built-in live activity view (`localhost:8787`) on the right.
 - **Boot the daemon** (`npm run dev`) — it authenticates as a dedicated *Claude* bot user and polls every few seconds.
