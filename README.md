@@ -15,6 +15,14 @@ turns a SaaS comment stream into an agent with memory, skills, and access to
 every system you expose over MCP. Swap Linear for your own service and the same
 pattern applies.
 
+https://github.com/user-attachments/assets/6d309c2e-b05b-4fdf-bde7-3c633438b9c6
+
+- **Split screen:** a Linear issue on the left; the bridge's built-in live activity view (`localhost:8787`) on the right.
+- **Boot the daemon** (`npm run dev`) — it authenticates as a dedicated *Claude* bot user and polls every few seconds.
+- **A comment triggers it** — someone comments *"run the sentinel check"*; the daemon picks it up on the next poll and the agent comes online with its full toolset, Linear's MCP server included.
+- **Watch it think** — the feed streams every step live as the agent loads the repo's local `sentinel-check` skill and calls the hosted Linear MCP server to read the issue.
+- **Reply auto-posted** — Claude's answer (the sentinel pass-phrase, plus proof that both the local skill *and* Linear MCP fired) lands straight back on the ticket.
+
 ```
          ┌──────────────┐   new comment   ┌────────────────────────────┐
          │   Linear     │ ───────────────▶│  bridge (this repo)         │
