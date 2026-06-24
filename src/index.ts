@@ -1,9 +1,11 @@
 import { loadConfig } from "./config.js";
 import { LinearClient } from "./linear.js";
 import { StateStore } from "./state.js";
-import { AgentSession } from "./session.js";
+import { AgentSession, preview } from "./session.js";
 import { classifyComment } from "./filter.js";
 import { buildPrompt } from "./prompt.js";
+import { ActivityHub } from "./activity.js";
+import { startVizServer } from "./web.js";
 
 function log(...args: unknown[]): void {
   console.log(`[${new Date().toISOString()}]`, ...args);
@@ -39,9 +41,23 @@ async function withStartupRetry<T>(label: string, fn: () => Promise<T>): Promise
 async function main(): Promise<void> {
   const config = loadConfig();
 
+  // The live activity feed. Started first so the very first events (auth,
+  // startup) show up in the browser view.
+  const hub = new ActivityHub();
+  if (config.vizEnabled) {
+    try {
+      await startVizServer({ hub, projectRoot: config.projectRoot, port: config.vizPort });
+      log(`Activity view: http://localhost:${config.vizPort}`);
+      hub.emit({ type: "info", text: `Activity view live on port ${config.vizPort}.` });
+    } catch (err) {
+      log("! Could not start the activity view:", err);
+    }
+  }
+
   const linear = new LinearClient(config);
   const viewer = await withStartupRetry("Linear auth", () => linear.getViewer());
   log(`Authenticated with Linear as "${viewer.name}" (${viewer.id}).`);
+  hub.emit({ type: "info", text: `Authenticated with Linear as ${viewer.name}.` });
   log(
     config.anthropicApiKey
       ? "Anthropic auth: using ANTHROPIC_API_KEY."
@@ -54,7 +70,7 @@ async function main(): Promise<void> {
     log(`Restricted to teams: ${config.teamKeys.join(", ")}.`);
   }
 
-  const agent = new AgentSession(config, state);
+  const agent = new AgentSession(config, state, hub);
 
   let running = true;
   const stop = (signal: string) => {
@@ -65,12 +81,16 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => stop("SIGINT"));
 
   log(`Polling every ${config.pollIntervalSeconds}s. Waiting for new comments...`);
+  hub.emit({ type: "info", text: `Watching Linear — polling every ${config.pollIntervalSeconds}s.` });
 
   while (running) {
     try {
       const comments = await linear.fetchCommentsSince(state.lastSeen);
       // Oldest first so the conversation stays in chronological order.
       comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      if (comments.length) {
+        hub.emit({ type: "poll", text: `Picked up ${comments.length} new comment(s) from Linear.` });
+      }
 
       for (const comment of comments) {
         if (!running) break;
@@ -89,23 +109,34 @@ async function main(): Promise<void> {
         }
 
         log(`→ ${comment.issueIdentifier}: comment from ${comment.authorName}`);
+        const ctx = { issue: comment.issueIdentifier, title: comment.issueTitle };
+        hub.emit({
+          type: "comment",
+          ...ctx,
+          actor: comment.authorName,
+          text: preview(comment.body, 400),
+        });
         try {
-          const reply = await agent.run(buildPrompt(comment));
+          const reply = await agent.run(buildPrompt(comment), ctx);
           if (reply) {
             const url = await linear.createComment(comment.issueId, capReply(reply));
             log(`← Replied on ${comment.issueIdentifier}: ${url}`);
+            hub.emit({ type: "reply", ...ctx, text: preview(reply, 600), detail: url });
           } else {
             log(`← Agent produced no reply for ${comment.issueIdentifier}; skipping.`);
+            hub.emit({ type: "skip", ...ctx, text: "Agent produced no reply." });
           }
         } catch (err) {
           // Don't let one poison comment wedge the loop forever — log and move on.
           log(`! Failed to handle comment ${comment.id} on ${comment.issueIdentifier}:`, err);
+          hub.emit({ type: "error", ...ctx, text: preview(String(err), 400) });
         }
         // Mark processed regardless of outcome so we never reprocess it.
         await state.markProcessed(comment.id, comment.createdAt);
       }
     } catch (err) {
       log("! Poll error:", err);
+      hub.emit({ type: "error", text: `Poll error: ${preview(String(err), 300)}` });
     }
 
     // Sleep in short slices so SIGTERM is honoured promptly.
@@ -114,6 +145,7 @@ async function main(): Promise<void> {
     }
   }
 
+  hub.emit({ type: "info", text: "Shutting down." });
   log("Shutdown complete.");
 }
 

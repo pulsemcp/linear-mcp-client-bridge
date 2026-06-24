@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Config } from "./config.js";
 import type { StateStore } from "./state.js";
+import type { ActivityHub } from "./activity.js";
 
 const require = createRequire(import.meta.url);
 
@@ -20,6 +21,13 @@ const TURN_TIMEOUT_MS = 5 * 60 * 1000;
  * the agent keeps the full history of every ticket it has ever seen. That shared
  * memory is the whole point — ticket #42 can be answered with what it learned on
  * ticket #7.
+ *
+ * We run with `--output-format stream-json` so the CLI emits one JSON object per
+ * line *as it works* — the init handshake, each assistant message, every tool
+ * call and result, then a final `result` line. We parse that stream live and
+ * forward a normalized view of it to the {@link ActivityHub}, which powers the
+ * browser activity view. The final `result` line is still the authoritative
+ * reply we post back to Linear.
  *
  * The agent's tools come entirely from the operator's `.mcp.json` (an MCP
  * aggregator, or individual servers listed directly — see `.mcp.example.json`).
@@ -43,8 +51,11 @@ export interface ClaudeArgsInput {
 export function buildClaudeArgs(input: ClaudeArgsInput): string[] {
   const args = [
     "--print",
+    // Stream NDJSON so we see each message/tool call as it happens, not just the
+    // final result. `--verbose` is required to stream in print mode.
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--model",
     input.model,
     "--permission-mode",
@@ -99,7 +110,13 @@ export function buildChildEnv(
   return env;
 }
 
-/** Parse the single JSON object emitted by `claude --print --output-format json`. */
+/**
+ * Parse the terminal `result` object emitted by `claude --print`.
+ *
+ * In both `--output-format json` and `--output-format stream-json` the CLI ends
+ * with the same `{type:"result", ...}` object, so this stays the single source
+ * of truth for the reply text, session id, and error state.
+ */
 export function parseClaudeResult(stdout: string): ClaudeResult {
   const trimmed = stdout.trim();
   if (!trimmed) throw new Error("claude CLI produced no output");
@@ -116,6 +133,170 @@ export function parseClaudeResult(stdout: string): ClaudeResult {
     isError: obj.is_error === true || (subtype !== null && subtype !== "success"),
     subtype,
   };
+}
+
+/** A normalized view of one stream-json line, ready to drive the activity feed. */
+export type AgentStreamEvent =
+  | { kind: "init"; tools: number; mcpServers: string[]; sessionId: string | null }
+  | { kind: "assistant"; text: string }
+  | { kind: "tool-use"; tool: string; input: string; toolUseId?: string }
+  | { kind: "tool-result"; text: string; isError: boolean; toolUseId?: string }
+  | { kind: "result"; result: ClaudeResult };
+
+/** Truncate a one-line preview so the feed stays readable. */
+export function preview(value: string, max = 240): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine;
+}
+
+function asText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((c) =>
+        c && typeof c === "object" && "text" in c && typeof (c as { text: unknown }).text === "string"
+          ? (c as { text: string }).text
+          : typeof c === "string"
+            ? c
+            : "",
+      )
+      .join(" ");
+  }
+  return "";
+}
+
+/**
+ * Pure normalization of a single parsed stream-json object into zero or more
+ * {@link AgentStreamEvent}s (an assistant message can carry several content
+ * blocks). Unknown shapes yield `[]`. Exported for testing.
+ */
+export function normalizeStreamObject(obj: unknown, rawLine: string): AgentStreamEvent[] {
+  if (!obj || typeof obj !== "object") return [];
+  const o = obj as Record<string, unknown>;
+  const type = o.type;
+
+  if (type === "system" && o.subtype === "init") {
+    const tools = Array.isArray(o.tools) ? o.tools.length : 0;
+    const servers = Array.isArray(o.mcp_servers)
+      ? (o.mcp_servers as Array<{ name?: unknown }>)
+          .map((s) => (typeof s?.name === "string" ? s.name : null))
+          .filter((n): n is string => n !== null)
+      : [];
+    return [
+      {
+        kind: "init",
+        tools,
+        mcpServers: servers,
+        sessionId: typeof o.session_id === "string" ? o.session_id : null,
+      },
+    ];
+  }
+
+  if (type === "assistant") {
+    const message = o.message as { content?: unknown } | undefined;
+    const blocks = Array.isArray(message?.content) ? (message!.content as unknown[]) : [];
+    const events: AgentStreamEvent[] = [];
+    for (const block of blocks) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as Record<string, unknown>;
+      if (b.type === "text" && typeof b.text === "string" && b.text.trim()) {
+        events.push({ kind: "assistant", text: b.text });
+      } else if (b.type === "tool_use" && typeof b.name === "string") {
+        events.push({
+          kind: "tool-use",
+          tool: b.name,
+          input: preview(JSON.stringify(b.input ?? {})),
+          toolUseId: typeof b.id === "string" ? b.id : undefined,
+        });
+      }
+    }
+    return events;
+  }
+
+  if (type === "user") {
+    const message = o.message as { content?: unknown } | undefined;
+    const blocks = Array.isArray(message?.content) ? (message!.content as unknown[]) : [];
+    const events: AgentStreamEvent[] = [];
+    for (const block of blocks) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as Record<string, unknown>;
+      if (b.type === "tool_result") {
+        events.push({
+          kind: "tool-result",
+          text: preview(asText(b.content)),
+          isError: b.is_error === true,
+          toolUseId: typeof b.tool_use_id === "string" ? b.tool_use_id : undefined,
+        });
+      }
+    }
+    return events;
+  }
+
+  if (type === "result") {
+    return [{ kind: "result", result: parseClaudeResult(rawLine) }];
+  }
+
+  return [];
+}
+
+/**
+ * Incrementally parses the CLI's NDJSON stdout. Feed it raw chunks with
+ * {@link push}; it splits on newlines, normalizes each complete line, and
+ * invokes `onEvent` live. Call {@link end} when the stream closes to flush any
+ * trailing partial line. The final reply is available via {@link finalResult}.
+ */
+export class StreamParser {
+  private buffer = "";
+  private result: ClaudeResult | null = null;
+  /** Maps a tool_use id to its tool name so tool results can be labelled. */
+  private readonly toolNames = new Map<string, string>();
+
+  constructor(private readonly onEvent: (event: AgentStreamEvent) => void) {}
+
+  push(chunk: string): void {
+    this.buffer += chunk;
+    let nl: number;
+    while ((nl = this.buffer.indexOf("\n")) >= 0) {
+      const line = this.buffer.slice(0, nl);
+      this.buffer = this.buffer.slice(nl + 1);
+      this.handleLine(line);
+    }
+  }
+
+  end(): void {
+    if (this.buffer.trim()) this.handleLine(this.buffer);
+    this.buffer = "";
+  }
+
+  get finalResult(): ClaudeResult | null {
+    return this.result;
+  }
+
+  private handleLine(line: string): void {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(trimmed);
+    } catch {
+      // The CLI occasionally interleaves non-JSON diagnostics; ignore them.
+      return;
+    }
+    for (const event of normalizeStreamObject(obj, trimmed)) {
+      if (event.kind === "tool-use" && event.toolUseId) {
+        this.toolNames.set(event.toolUseId, event.tool);
+      }
+      if (event.kind === "result") {
+        this.result = event.result;
+      }
+      this.onEvent(event);
+    }
+  }
+
+  /** Look up the tool name for a tool-result event (set during tool-use). */
+  toolNameFor(toolUseId: string | undefined): string | undefined {
+    return toolUseId ? this.toolNames.get(toolUseId) : undefined;
+  }
 }
 
 /** Resolve the bundled `claude` binary (overridable via CLAUDE_BIN). */
@@ -142,6 +323,12 @@ function buildMcpConfigs(config: Config): string[] {
   return existsSync(projectMcp) ? [projectMcp] : [];
 }
 
+/** Context attached to the activity events emitted during a single turn. */
+export interface TurnContext {
+  issue?: string;
+  title?: string;
+}
+
 export class AgentSession {
   private readonly claudeBin: string;
   private readonly mcpConfigs: string[];
@@ -149,6 +336,7 @@ export class AgentSession {
   constructor(
     private readonly config: Config,
     private readonly state: StateStore,
+    private readonly hub?: ActivityHub,
   ) {
     this.claudeBin = resolveClaudeBin();
     this.mcpConfigs = buildMcpConfigs(config);
@@ -156,9 +344,10 @@ export class AgentSession {
 
   /**
    * Run one turn. Returns the agent's final text, which the caller posts back
-   * to Linear as the reply.
+   * to Linear as the reply. As the turn runs, a normalized view of every
+   * message and tool call is emitted to the activity hub (if one is wired in).
    */
-  async run(prompt: string): Promise<string> {
+  async run(prompt: string, ctx: TurnContext = {}): Promise<string> {
     const args = buildClaudeArgs({
       model: this.config.model,
       permissionMode: this.config.permissionMode,
@@ -168,9 +357,13 @@ export class AgentSession {
       resume: this.state.sessionId ?? undefined,
     });
 
-    const stdout = await this.exec(args, prompt);
-    const result = parseClaudeResult(stdout);
+    const parser = new StreamParser((event) => this.publish(event, ctx, parser));
+    await this.exec(args, prompt, parser);
 
+    const result = parser.finalResult;
+    if (!result) {
+      throw new Error("claude CLI ended without a result line");
+    }
     // Capture (or refresh) the session id so the next turn resumes this thread.
     if (result.sessionId) await this.state.setSessionId(result.sessionId);
     if (result.isError) {
@@ -179,8 +372,41 @@ export class AgentSession {
     return result.text.trim();
   }
 
-  /** Spawn the CLI, feed the prompt on stdin, and collect stdout. */
-  private exec(args: string[], prompt: string): Promise<string> {
+  /** Translate a normalized stream event into an activity-feed entry. */
+  private publish(event: AgentStreamEvent, ctx: TurnContext, parser: StreamParser): void {
+    if (!this.hub) return;
+    const base = { issue: ctx.issue, title: ctx.title };
+    switch (event.kind) {
+      case "init":
+        this.hub.emit({
+          ...base,
+          type: "info",
+          text: `Agent online — ${event.tools} tools available`,
+          detail: event.mcpServers.length ? `MCP: ${event.mcpServers.join(", ")}` : undefined,
+        });
+        break;
+      case "assistant":
+        this.hub.emit({ ...base, type: "assistant", text: event.text });
+        break;
+      case "tool-use":
+        this.hub.emit({ ...base, type: "tool-use", tool: event.tool, text: event.input });
+        break;
+      case "tool-result":
+        this.hub.emit({
+          ...base,
+          type: event.isError ? "error" : "tool-result",
+          tool: parser.toolNameFor(event.toolUseId),
+          text: event.text,
+        });
+        break;
+      case "result":
+        // The final reply is announced by the daemon once it's posted to Linear.
+        break;
+    }
+  }
+
+  /** Spawn the CLI, feed the prompt on stdin, and stream stdout into the parser. */
+  private exec(args: string[], prompt: string, parser: StreamParser): Promise<void> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.claudeBin, args, {
         cwd: this.config.projectRoot,
@@ -191,7 +417,6 @@ export class AgentSession {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
-      let stdout = "";
       let stderr = "";
       // Settle exactly once: a SIGKILL timeout also fires `close`, and we must
       // not let the second event overwrite the first outcome.
@@ -207,14 +432,15 @@ export class AgentSession {
         settle(() => reject(new Error(`claude CLI turn timed out after ${TURN_TIMEOUT_MS / 1000}s`)));
       }, TURN_TIMEOUT_MS);
 
-      child.stdout.on("data", (d) => (stdout += d.toString()));
+      child.stdout.on("data", (d) => parser.push(d.toString()));
       child.stderr.on("data", (d) => (stderr += d.toString()));
       child.on("error", (err) => settle(() => reject(err)));
       child.on("close", (code) => {
+        parser.end();
         settle(() =>
           code === 0
-            ? resolve(stdout)
-            : reject(new Error(`claude CLI exited ${code}: ${(stderr || stdout).slice(0, 1000)}`)),
+            ? resolve()
+            : reject(new Error(`claude CLI exited ${code}: ${stderr.slice(0, 1000)}`)),
         );
       });
 

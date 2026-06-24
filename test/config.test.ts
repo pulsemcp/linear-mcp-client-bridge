@@ -14,6 +14,8 @@ const TOUCHED = [
   "LINEAR_TEAM_KEYS",
   "STATE_DIR",
   "PROJECT_ROOT",
+  "VIZ_ENABLED",
+  "VIZ_PORT",
 ];
 
 /** Run `fn` with a clean, controlled slice of the environment. */
@@ -69,6 +71,27 @@ test("applies sensible defaults", () => {
     assert.deepEqual(c.teamKeys, []);
     assert.deepEqual(c.allowedTools, []);
     assert.deepEqual(c.disallowedTools, []);
+    // The activity view is on by default, on port 8787.
+    assert.equal(c.vizEnabled, true);
+    assert.equal(c.vizPort, 8787);
+  });
+});
+
+test("activity view can be disabled and re-ported", () => {
+  withEnv(
+    { LINEAR_API_TOKEN: "lin_api_x", VIZ_ENABLED: "false", VIZ_PORT: "9000" },
+    () => {
+      const c = loadConfig();
+      assert.equal(c.vizEnabled, false);
+      assert.equal(c.vizPort, 9000);
+    },
+  );
+  // Any non-"false" value keeps it enabled.
+  withEnv({ LINEAR_API_TOKEN: "lin_api_x", VIZ_ENABLED: "FALSE" }, () => {
+    assert.equal(loadConfig().vizEnabled, false); // case-insensitive
+  });
+  withEnv({ LINEAR_API_TOKEN: "lin_api_x", VIZ_ENABLED: "yes" }, () => {
+    assert.equal(loadConfig().vizEnabled, true);
   });
 });
 

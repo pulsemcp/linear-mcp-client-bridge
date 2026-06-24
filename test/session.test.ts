@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import {
   buildChildEnv,
   buildClaudeArgs,
+  normalizeStreamObject,
   parseClaudeResult,
+  preview,
+  StreamParser,
+  type AgentStreamEvent,
 } from "../src/session.js";
 
 const base = {
@@ -14,11 +18,13 @@ const base = {
   mcpConfigs: [] as string[],
 };
 
-test("buildClaudeArgs sets print mode, json output, model and permission mode", () => {
+test("buildClaudeArgs sets print mode, streaming json output, model and permission mode", () => {
   const args = buildClaudeArgs(base);
   assert.ok(args.includes("--print"));
-  // --output-format is immediately followed by json.
-  assert.equal(args[args.indexOf("--output-format") + 1], "json");
+  // Streaming NDJSON so we see each message/tool call live; --verbose is
+  // required for streaming in print mode.
+  assert.equal(args[args.indexOf("--output-format") + 1], "stream-json");
+  assert.ok(args.includes("--verbose"));
   assert.equal(args[args.indexOf("--model") + 1], "claude-opus-4-8");
   assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
 });
@@ -114,4 +120,100 @@ test("buildChildEnv leaves an inherited key in place when none is configured", (
 test("buildChildEnv strips a blank inherited key so it can't shadow the CLI login", () => {
   const env = buildChildEnv({ ANTHROPIC_API_KEY: "   " }, undefined);
   assert.ok(!("ANTHROPIC_API_KEY" in env));
+});
+
+test("preview collapses whitespace and truncates with an ellipsis", () => {
+  assert.equal(preview("  hello   world \n there "), "hello world there");
+  assert.equal(preview("abcdef", 4), "abc…");
+  // Exactly at the limit is left intact.
+  assert.equal(preview("abcd", 4), "abcd");
+});
+
+test("normalizeStreamObject maps a system/init line to an init event", () => {
+  const events = normalizeStreamObject(
+    {
+      type: "system",
+      subtype: "init",
+      session_id: "s1",
+      tools: ["Read", "Bash", "mcp__linear__get_issue"],
+      mcp_servers: [{ name: "linear" }, { name: "gateway" }, { notName: "x" }],
+    },
+    "{}",
+  );
+  assert.deepEqual(events, [
+    { kind: "init", tools: 3, mcpServers: ["linear", "gateway"], sessionId: "s1" },
+  ]);
+});
+
+test("normalizeStreamObject splits an assistant message into text + tool_use events", () => {
+  const events = normalizeStreamObject(
+    {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Looking into it." },
+          { type: "text", text: "   " }, // blank text is dropped
+          { type: "tool_use", id: "t1", name: "mcp__linear__get_issue", input: { id: "ENG-1" } },
+        ],
+      },
+    },
+    "{}",
+  );
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0], { kind: "assistant", text: "Looking into it." });
+  assert.equal(events[1]?.kind, "tool-use");
+  assert.equal((events[1] as { tool: string }).tool, "mcp__linear__get_issue");
+  assert.equal((events[1] as { input: string }).input, '{"id":"ENG-1"}');
+  assert.equal((events[1] as { toolUseId?: string }).toolUseId, "t1");
+});
+
+test("normalizeStreamObject maps a user tool_result (string and error) to tool-result events", () => {
+  const ok = normalizeStreamObject(
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ENG-1 ok" }] } },
+    "{}",
+  );
+  assert.deepEqual(ok, [{ kind: "tool-result", text: "ENG-1 ok", isError: false, toolUseId: "t1" }]);
+
+  const err = normalizeStreamObject(
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "t2", is_error: true, content: [{ type: "text", text: "boom" }] }] },
+    },
+    "{}",
+  );
+  assert.deepEqual(err, [{ kind: "tool-result", text: "boom", isError: true, toolUseId: "t2" }]);
+});
+
+test("normalizeStreamObject parses the terminal result line; unknown types yield nothing", () => {
+  const result = normalizeStreamObject(
+    { type: "result" },
+    JSON.stringify({ type: "result", subtype: "success", result: "done", session_id: "s9", is_error: false }),
+  );
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.kind, "result");
+  assert.equal((result[0] as { result: { text: string } }).result.text, "done");
+  assert.deepEqual(normalizeStreamObject({ type: "something-else" }, "{}"), []);
+  assert.deepEqual(normalizeStreamObject(null, "{}"), []);
+});
+
+test("StreamParser streams events live, labels tool results, and exposes the final result", () => {
+  const seen: AgentStreamEvent[] = [];
+  const parser = new StreamParser((e) => seen.push(e));
+
+  // Feed the NDJSON in arbitrary chunks to prove line-buffering across writes.
+  parser.push('{"type":"system","subtype":"init","session_id":"s1","tools":["Read"],"mcp_servers":[{"name":"linear"}]}\n');
+  parser.push('{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","na');
+  parser.push('me":"mcp__linear__get_issue","input":{"id":"ENG-1"}}]}}\n');
+  parser.push('not json — should be ignored\n');
+  parser.push('{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"found it"}]}}\n');
+  // Terminal result without a trailing newline — flushed by end().
+  parser.push('{"type":"result","subtype":"success","result":"all done","session_id":"s1","is_error":false}');
+  parser.end();
+
+  const kinds = seen.map((e) => e.kind);
+  assert.deepEqual(kinds, ["init", "tool-use", "tool-result", "result"]);
+  assert.equal(parser.toolNameFor("t1"), "mcp__linear__get_issue");
+  assert.equal(parser.finalResult?.text, "all done");
+  assert.equal(parser.finalResult?.sessionId, "s1");
+  assert.equal(parser.finalResult?.isError, false);
 });

@@ -14,6 +14,13 @@ services:
       AGENT_ALLOWED_TOOLS: ${AGENT_ALLOWED_TOOLS:-}
       AGENT_DISALLOWED_TOOLS: ${AGENT_DISALLOWED_TOOLS:-}
       LINEAR_TEAM_KEYS: ${LINEAR_TEAM_KEYS:-}
+      # Live activity web view (see README "Live activity view").
+      VIZ_ENABLED: ${VIZ_ENABLED:-true}
+      VIZ_PORT: ${VIZ_PORT:-8787}
+    ports:
+      # Browse the live activity feed at http://localhost:${VIZ_PORT:-8787}.
+      # Host and container ports are kept equal so changing VIZ_PORT just works.
+      - "${VIZ_PORT:-8787}:${VIZ_PORT:-8787}"
     volumes:
       # Persists the session id + poll cursor across restarts.
       - bridge-state:/data
