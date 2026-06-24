@@ -46,7 +46,12 @@ async function main(): Promise<void> {
   const hub = new ActivityHub();
   if (config.vizEnabled) {
     try {
-      await startVizServer({ hub, projectRoot: config.projectRoot, port: config.vizPort });
+      await startVizServer({
+        hub,
+        projectRoot: config.projectRoot,
+        port: config.vizPort,
+        host: config.vizHost,
+      });
       log(`Activity view: http://localhost:${config.vizPort}`);
       hub.emit({ type: "info", text: `Activity view live on port ${config.vizPort}.` });
     } catch (err) {

@@ -90,19 +90,40 @@ export function createVizServer(opts: VizServerOptions): http.Server {
         // Disable proxy buffering so events arrive immediately.
         "X-Accel-Buffering": "no",
       });
+      let unsubscribe: (() => void) | undefined;
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      // Idempotent: may be called on req close, res close/error, or a failed
+      // write, possibly more than once.
+      const cleanup = () => {
+        if (heartbeat) clearInterval(heartbeat);
+        unsubscribe?.();
+        unsubscribe = undefined;
+      };
+      // Writing to a disconnected socket can throw synchronously; tear the
+      // connection down cleanly instead of letting it surface unhandled.
+      const safeWrite = (chunk: string): void => {
+        if (res.writableEnded) {
+          cleanup();
+          return;
+        }
+        try {
+          res.write(chunk);
+        } catch {
+          cleanup();
+        }
+      };
       // Tell the browser how soon to reconnect if the stream drops.
-      res.write("retry: 3000\n\n");
+      safeWrite("retry: 3000\n\n");
       // Replay recent context, then subscribe to live events.
-      for (const event of hub.recent()) res.write(formatSse(event));
-      const unsubscribe = hub.subscribe((event) => res.write(formatSse(event)));
-      const heartbeat = setInterval(() => res.write(": ping\n\n"), heartbeatMs);
+      for (const event of hub.recent()) safeWrite(formatSse(event));
+      unsubscribe = hub.subscribe((event) => safeWrite(formatSse(event)));
+      heartbeat = setInterval(() => safeWrite(": ping\n\n"), heartbeatMs);
       // Don't let the heartbeat timer keep the process alive on its own.
       heartbeat.unref?.();
-      const cleanup = () => {
-        clearInterval(heartbeat);
-        unsubscribe();
-      };
+      // Cover both client-side disconnects (req close) and server/socket
+      // teardown (res close/error). cleanup is idempotent.
       req.on("close", cleanup);
+      res.on("close", cleanup);
       res.on("error", cleanup);
       return;
     }

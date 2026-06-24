@@ -16,6 +16,7 @@ const TOUCHED = [
   "PROJECT_ROOT",
   "VIZ_ENABLED",
   "VIZ_PORT",
+  "VIZ_HOST",
 ];
 
 /** Run `fn` with a clean, controlled slice of the environment. */
@@ -71,9 +72,11 @@ test("applies sensible defaults", () => {
     assert.deepEqual(c.teamKeys, []);
     assert.deepEqual(c.allowedTools, []);
     assert.deepEqual(c.disallowedTools, []);
-    // The activity view is on by default, on port 8787.
+    // The activity view is on by default, on port 8787, bound to all
+    // interfaces (so the container's published port is reachable).
     assert.equal(c.vizEnabled, true);
     assert.equal(c.vizPort, 8787);
+    assert.equal(c.vizHost, "0.0.0.0");
   });
 });
 
@@ -92,6 +95,10 @@ test("activity view can be disabled and re-ported", () => {
   });
   withEnv({ LINEAR_API_TOKEN: "lin_api_x", VIZ_ENABLED: "yes" }, () => {
     assert.equal(loadConfig().vizEnabled, true);
+  });
+  // The bind host is overridable (e.g. to keep the feed local-only).
+  withEnv({ LINEAR_API_TOKEN: "lin_api_x", VIZ_HOST: "127.0.0.1" }, () => {
+    assert.equal(loadConfig().vizHost, "127.0.0.1");
   });
 });
 

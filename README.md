@@ -226,6 +226,7 @@ All configuration is environment variables (see `.env.example`):
 | `LINEAR_TEAM_KEYS` | | _(all)_ | Comma-separated team keys to limit scope, e.g. `ENG,OPS`. |
 | `VIZ_ENABLED` | | `true` | Serve the [live activity view](#live-activity-view). Set to `false` to disable it. |
 | `VIZ_PORT` | | `8787` | Port the activity view listens on (and the published port in `docker-compose.yml`). |
+| `VIZ_HOST` | | `0.0.0.0` | Interface the activity view binds to. Defaults to all interfaces so the container's published port is reachable; set `127.0.0.1` to keep the (unauthenticated) feed local-only. |
 | `MCP_AGGREGATOR_URL` | | `http://localhost:3000/mcp` | URL the default `.mcp.json` gateway entry points at. |
 | `STATE_DIR` | | `./state` (code) / `/data` (Docker image) | Where the session id + poll cursor are stored. The Docker image sets `/data` and mounts it as a volume. |
 | `CLAUDE_BIN` | | _(bundled)_ | Path to the `claude` binary. Defaults to the one bundled with the `@anthropic-ai/claude-code` dependency; override only if you want a different CLI build. |
