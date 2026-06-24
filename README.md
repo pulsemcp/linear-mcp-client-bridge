@@ -130,6 +130,23 @@ mount is harmless if you picked Option A — an `ANTHROPIC_API_KEY` takes preced
 > Using plain `docker run` instead of Compose? Add the mount yourself (shown in
 > the [Plain Docker](#plain-docker-no-compose) snippet below).
 
+> **⚠️ macOS + Docker: Option B does not work — use Option A.** This one is easy
+> to miss because it fails silently. On macOS, `claude login` stores its token in
+> the **login Keychain**, *not* in `~/.claude/.credentials.json`. So the
+> `~/.claude` bind mount carries no credential into the (Linux) container, the
+> bundled `claude` starts up logged-out, and every turn errors with an
+> authentication failure. Two ways around it on a Mac:
+>
+> - **Set `ANTHROPIC_API_KEY` (Option A).** This is the recommended path for
+>   Docker on macOS and is fully self-contained in the container.
+> - **Skip Docker and run locally** with `npm` (see
+>   [Local development](#local-development)). The CLI then runs natively on the
+>   host, reaches the Keychain directly, and reuses your subscription login with
+>   no API key.
+>
+> Linux hosts are unaffected — there the login really does live in `~/.claude`,
+> so the mount works as described above.
+
 ### 5. Configure secrets
 
 ```bash
