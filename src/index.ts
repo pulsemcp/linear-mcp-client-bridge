@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { LinearClient } from "./linear.js";
+import { LinearClient, type LinearComment } from "./linear.js";
 import { StateStore } from "./state.js";
 import { AgentSession, preview } from "./session.js";
 import { classifyComment } from "./filter.js";
@@ -93,13 +93,14 @@ async function main(): Promise<void> {
       const comments = await linear.fetchCommentsSince(state.lastSeen);
       // Oldest first so the conversation stays in chronological order.
       comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      if (comments.length) {
-        hub.emit({ type: "poll", text: `Picked up ${comments.length} new comment(s) from Linear.` });
-      }
 
+      // Classify up front and keep only the comments we'll actually answer. The
+      // rest still get their cursor advanced, but they must not surface in the
+      // activity feed as "new" work — especially the already-handled comment the
+      // inclusive (gte) cursor re-fetches on every single poll, which would
+      // otherwise spam "Picked up 1 new comment" forever.
+      const toHandle: LinearComment[] = [];
       for (const comment of comments) {
-        if (!running) break;
-
         const decision = classifyComment(
           comment,
           viewer.id,
@@ -112,6 +113,15 @@ async function main(): Promise<void> {
           await state.markProcessed(comment.id, comment.createdAt);
           continue;
         }
+        toHandle.push(comment);
+      }
+
+      if (toHandle.length) {
+        hub.emit({ type: "poll", text: `Picked up ${toHandle.length} new comment(s) from Linear.` });
+      }
+
+      for (const comment of toHandle) {
+        if (!running) break;
 
         log(`→ ${comment.issueIdentifier}: comment from ${comment.authorName}`);
         const ctx = { issue: comment.issueIdentifier, title: comment.issueTitle };

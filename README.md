@@ -288,11 +288,12 @@ the same credential is convenient here:
 in `.env`, not in the committed file. Anything you add shows up to Claude as
 `mcp__<server>__<tool>` tools.
 
-> The default `.mcp.json` ships with a single `gateway` entry pointing at
-> `localhost:3000`. The agent has no tools until `.mcp.json` lists at least one
-> reachable server, so if you don't run a gateway, set `MCP_AGGREGATOR_URL` to a
-> real one or replace that entry with the individual servers you want. To give
-> the agent Linear tools, copy the `linear` block from `.mcp.example.json`.
+> The default `.mcp.json` ships with Linear's hosted MCP server, so the agent has
+> Linear tools (search/create/update issues) out of the box, reusing
+> `LINEAR_API_TOKEN`. The agent has no tools until `.mcp.json` lists at least one
+> reachable server, so to front many upstreams with a gateway instead, replace
+> that entry with a `gateway` block pointing at your `MCP_AGGREGATOR_URL` (see
+> `.mcp.example.json` for both patterns).
 
 ## Teaching it new behaviors (CLAUDE.md + skills)
 
