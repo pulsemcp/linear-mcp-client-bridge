@@ -3,6 +3,7 @@
 
   "mcpServers": {
     "gateway": {
+      "_comment": "An MCP gateway/aggregator over HTTP — the ideal: front many upstream MCP servers behind one endpoint, then add or remove upstreams there with no change here. Swap this back into .mcp.json (replacing the linear entry, or alongside it) to route the agent through your gateway. ${MCP_AGGREGATOR_URL} is read from .env and defaults to localhost:3000.",
       "type": "http",
       "url": "${MCP_AGGREGATOR_URL:-http://localhost:3000/mcp}"
     },
