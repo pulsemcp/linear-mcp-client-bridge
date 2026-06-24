@@ -55,41 +55,114 @@ pattern applies.
   skill teaches Claude to answer strategy questions about technical work by
   grounding them in Zoom meeting transcripts and Notion documentation.
 
-## Prerequisites
+## How to run it (step by step)
 
-- [Docker](https://docs.docker.com/get-docker/) (with Compose).
-- An **Anthropic API key** — <https://console.anthropic.com/settings/keys>.
-- A **Linear personal API key** — in Linear: *Settings → Security & access →
-  Personal API keys → New key*. It looks like `lin_api_…`.
+The full path from a fresh machine to Claude replying on your tickets. Three
+things to gather — Docker, a Linear key, and a way for Claude to authenticate —
+then one command.
 
-> The bridge acts **as the user who owns the API key**: it can read what that
-> user can read and comments under their name. Consider creating a dedicated
-> Linear user ("Claude", a bot account) and generating the key from there.
+### 1. Install Docker
 
-## Quick start (Docker Compose)
+Docker runs the bridge; you don't need Node or anything else on your machine.
+
+- **Mac / Windows:** install [Docker Desktop](https://docs.docker.com/get-docker/).
+  Compose is included.
+- **Linux:** install [Docker Engine](https://docs.docker.com/engine/install/)
+  plus the [Compose plugin](https://docs.docker.com/compose/install/linux/).
+
+Verify it works (both commands should print a version):
 
 ```bash
-# 1. Clone
-git clone https://github.com/<you>/linear-mcp-client-bridge.git
-cd linear-mcp-client-bridge
-
-# 2. Configure secrets
-cp .env.example .env
-$EDITOR .env          # set LINEAR_API_TOKEN (and ANTHROPIC_API_KEY, unless the
-                      # host already has a `claude` login to fall back on)
-
-# 3. Build and run
-docker compose up --build -d
-
-# 4. Watch it
-docker compose logs -f
+docker --version
+docker compose version
 ```
 
-Now go to any issue in your Linear workspace and add a comment. Within a poll
-interval (default 20s) Claude replies on the ticket. That's it.
+### 2. Get the code
 
-To stop: `docker compose down` (your session memory survives in the
-`bridge-state` volume; `docker compose down -v` wipes it).
+```bash
+git clone https://github.com/<you>/linear-mcp-client-bridge.git
+cd linear-mcp-client-bridge
+```
+
+### 3. Get a Linear API key
+
+In Linear: **Settings → Security & access → Personal API keys → New key**
+(see Linear's [API docs](https://linear.app/docs/api-and-webhooks) if the menu
+has moved). Copy the value — it looks like `lin_api_xxxxxxxxxxxxxxxx`. This
+single key does double duty: it
+drives the poll loop *and* is the bearer credential for Linear's hosted MCP
+tools.
+
+> The bridge acts **as the user who owns this key** — it reads what that user can
+> read and comments under their name. For anything beyond a quick trial, create a
+> dedicated Linear user ("Claude", a bot account) and generate the key from
+> there, granting it access only to the teams it should touch.
+
+### 4. Decide how Claude authenticates (pick one)
+
+Each comment is handled by shelling out to `claude -p`, which has to log in to
+Anthropic. There are two ways to provide that — pick whichever you already have.
+
+**Option A — Anthropic API key (simplest, recommended for Docker).** Pay-as-you-go
+billing, fully self-contained in the container.
+
+1. Create a key at <https://console.anthropic.com/settings/keys> (looks like
+   `sk-ant-…`).
+2. You'll paste it into `.env` as `ANTHROPIC_API_KEY` in the next step. Done.
+
+**Option B — Ambient `claude` login (reuse an existing Claude subscription).** If
+you already use Claude Code locally via `claude login` (a Pro/Max plan), the
+bridge can reuse that login instead of an API key — leave `ANTHROPIC_API_KEY`
+unset.
+
+- **Running locally** (the [Local development](#local-development) flow,
+  `npm run dev` / `npm run smoke`): nothing to do — the CLI finds your
+  `~/.claude` login automatically.
+- **Running in Docker:** the container is a clean environment with no login of
+  its own, so mount your host credentials into it. Add this to the `bridge`
+  service in `docker-compose.yml`:
+
+  ```yaml
+      volumes:
+        - bridge-state:/data
+        - ~/.claude:/home/node/.claude   # <-- share your host claude login
+  ```
+
+  The container runs as the `node` user (uid 1000); make sure your host
+  `~/.claude` is readable/writable by that uid (on most single-user Linux/macOS
+  setups it already is). The CLI refreshes its token in place, so mount it
+  read-write. If you'd rather not share the host login, use Option A.
+
+### 5. Configure secrets
+
+```bash
+cp .env.example .env
+$EDITOR .env
+```
+
+Set:
+
+- `LINEAR_API_TOKEN` — the `lin_api_…` key from step 3 (**required**).
+- `ANTHROPIC_API_KEY` — the `sk-ant-…` key from step 4, **only if you chose
+  Option A**. Leave it commented out for Option B.
+
+Everything else has sensible defaults (see [Configuration](#configuration)).
+
+### 6. Build and run
+
+```bash
+docker compose up --build -d   # build the image and start the daemon
+docker compose logs -f         # watch it poll and reply
+```
+
+### 7. Try it
+
+Go to any issue in your Linear workspace and add a comment — for a first smoke
+test, comment **"run the sentinel check"**. Within one poll interval (default
+20s) Claude replies on the ticket. That's it.
+
+To stop: `docker compose down`. Your session memory survives in the
+`bridge-state` volume; `docker compose down -v` wipes it.
 
 ### Plain Docker (no Compose)
 
@@ -99,6 +172,7 @@ docker run -d --name linear-bridge \
   --env-file .env \
   -v linear-bridge-state:/data \
   linear-mcp-client-bridge
+  # For ambient login (step 4, Option B) add: -v ~/.claude:/home/node/.claude
 ```
 
 ## Configuration
