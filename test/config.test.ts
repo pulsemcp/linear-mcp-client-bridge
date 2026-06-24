@@ -6,7 +6,6 @@ const TOUCHED = [
   "ANTHROPIC_API_KEY",
   "LINEAR_API_TOKEN",
   "LINEAR_API_URL",
-  "LINEAR_MCP_URL",
   "AGENT_MODEL",
   "AGENT_PERMISSION_MODE",
   "AGENT_ALLOWED_TOOLS",
@@ -67,7 +66,6 @@ test("applies sensible defaults", () => {
     assert.equal(c.permissionMode, "bypassPermissions");
     assert.equal(c.pollIntervalSeconds, 20);
     assert.equal(c.linearApiUrl, "https://api.linear.app/graphql");
-    assert.equal(c.linearMcpUrl, "https://mcp.linear.app/mcp");
     assert.deepEqual(c.teamKeys, []);
     assert.deepEqual(c.allowedTools, []);
     assert.deepEqual(c.disallowedTools, []);
@@ -89,7 +87,6 @@ test("parses overrides, uppercases team keys, splits tool lists", () => {
       ANTHROPIC_API_KEY: "sk-ant",
       LINEAR_API_TOKEN: "lin_api_x",
       AGENT_MODEL: "claude-sonnet-4-6",
-      LINEAR_MCP_URL: "https://proxy.example/mcp",
       POLL_INTERVAL_SECONDS: "5",
       LINEAR_TEAM_KEYS: "eng, ops ,, qa",
       AGENT_DISALLOWED_TOOLS: "Bash, Write ,Edit",
@@ -98,7 +95,6 @@ test("parses overrides, uppercases team keys, splits tool lists", () => {
     () => {
       const c = loadConfig();
       assert.equal(c.model, "claude-sonnet-4-6");
-      assert.equal(c.linearMcpUrl, "https://proxy.example/mcp");
       assert.equal(c.pollIntervalSeconds, 5);
       assert.deepEqual(c.teamKeys, ["ENG", "OPS", "QA"]);
       assert.deepEqual(c.disallowedTools, ["Bash", "Write", "Edit"]);

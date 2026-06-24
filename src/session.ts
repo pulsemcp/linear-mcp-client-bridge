@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Config } from "./config.js";
 import type { StateStore } from "./state.js";
@@ -21,9 +21,11 @@ const TURN_TIMEOUT_MS = 5 * 60 * 1000;
  * memory is the whole point — ticket #42 can be answered with what it learned on
  * ticket #7.
  *
- * Linear tools are provided to the agent by Linear's official hosted MCP server
- * (`https://mcp.linear.app/mcp`), wired in via `--mcp-config` alongside the
- * operator's `.mcp.json`.
+ * The agent's tools come entirely from the operator's `.mcp.json` (an MCP
+ * aggregator, or individual servers listed directly — see `.mcp.example.json`).
+ * The daemon injects nothing of its own here: its `LINEAR_API_TOKEN` drives only
+ * the deterministic poll/post harness, kept deliberately separate from whatever
+ * tools the agent is handed.
  */
 
 export interface ClaudeArgsInput {
@@ -127,39 +129,17 @@ function resolveClaudeBin(): string {
 }
 
 /**
- * The MCP config that points the agent at Linear's official hosted server.
- *
- * The Linear token is sent as a bearer credential, but written as a literal
- * `${LINEAR_API_TOKEN}` placeholder: the `claude` CLI expands it from the child
- * env when it loads the config, so the real token never lands on the command
- * line nor in this file on disk. Pure (no I/O) so it can be unit-tested.
- */
-export function buildLinearMcpConfig(url: string): string {
-  return JSON.stringify({
-    mcpServers: {
-      linear: {
-        type: "http",
-        url,
-        headers: { Authorization: "Bearer ${LINEAR_API_TOKEN}" },
-      },
-    },
-  });
-}
-
-/**
- * The MCP configs to hand the CLI: the official Linear server + the operator's
- * project .mcp.json. We write the Linear config to a file (placeholder only,
- * no secret) under the state dir and pass it by path — the form the CLI
- * reliably env-expands, and the same mechanism the project .mcp.json relies on.
+ * The MCP configs to hand the CLI: just the operator's project `.mcp.json`, if
+ * present. That file is the agent's entire tool surface — an MCP aggregator, or
+ * individual servers listed directly (e.g. Linear's official hosted MCP server;
+ * see `.mcp.example.json`). The daemon adds nothing of its own: its
+ * `LINEAR_API_TOKEN` is the poll/post harness credential, kept separate from the
+ * agent's tools. `${VAR}` placeholders inside `.mcp.json` are env-expanded by the
+ * CLI from the child env at load time, so secrets stay out of the committed file.
  */
 function buildMcpConfigs(config: Config): string[] {
-  mkdirSync(config.stateDir, { recursive: true });
-  const linearPath = path.join(config.stateDir, "linear-mcp.json");
-  writeFileSync(linearPath, buildLinearMcpConfig(config.linearMcpUrl));
-  const configs = [linearPath];
   const projectMcp = path.join(config.projectRoot, ".mcp.json");
-  if (existsSync(projectMcp)) configs.push(projectMcp);
-  return configs;
+  return existsSync(projectMcp) ? [projectMcp] : [];
 }
 
 export class AgentSession {
@@ -205,8 +185,8 @@ export class AgentSession {
       const child = spawn(this.claudeBin, args, {
         cwd: this.config.projectRoot,
         // The CLI reads ANTHROPIC_API_KEY from the environment (or falls back to
-        // its own login when none is set), and expands the ${LINEAR_API_TOKEN}
-        // placeholder in the Linear MCP config from this same env.
+        // its own login when none is set), and expands any ${VAR} placeholders in
+        // the operator's .mcp.json (e.g. a server's bearer token) from this env.
         env: buildChildEnv(process.env, this.config.anthropicApiKey),
         stdio: ["pipe", "pipe", "pipe"],
       });

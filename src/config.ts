@@ -20,12 +20,6 @@ export interface Config {
   linearApiToken: string;
   /** Linear GraphQL endpoint — used by the daemon's own poll loop. */
   linearApiUrl: string;
-  /**
-   * Linear's official hosted MCP server, given to the agent so it has Linear
-   * tools. The same `linearApiToken` is sent as a bearer credential. Override
-   * only to point at a proxy or the legacy SSE endpoint.
-   */
-  linearMcpUrl: string;
   /** Model the agent runs on. */
   model: string;
   /** Claude Code permission mode. See README "Security" before changing. */
@@ -97,7 +91,6 @@ export function loadConfig(): Config {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || undefined,
     linearApiToken: required("LINEAR_API_TOKEN"),
     linearApiUrl: process.env.LINEAR_API_URL?.trim() || "https://api.linear.app/graphql",
-    linearMcpUrl: process.env.LINEAR_MCP_URL?.trim() || "https://mcp.linear.app/mcp",
     model: process.env.AGENT_MODEL?.trim() || "claude-opus-4-8",
     permissionMode,
     allowedTools: splitList(process.env.AGENT_ALLOWED_TOOLS),

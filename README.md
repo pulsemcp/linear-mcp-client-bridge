@@ -6,8 +6,9 @@ An example of how you can de-facto inject a highly capable agent — and a full
 This one wires [Claude Code](https://docs.claude.com/en/docs/claude-code) into
 [Linear](https://linear.app). A tiny daemon polls your workspace and pipes every
 new ticket comment into **one continuous Claude session**. Claude reads the
-comment, uses whatever tools you've connected (Linear itself, plus any MCP
-servers you configure), and its answer is posted straight back to the ticket.
+comment, uses whatever tools you've connected over MCP (an aggregator, Linear's
+own MCP server, your internal services), and its answer is posted straight back
+to the ticket.
 
 The interesting part isn't the Linear glue — it's the shape. A ~250-line harness
 turns a SaaS comment stream into an agent with memory, skills, and access to
@@ -23,11 +24,11 @@ pattern applies.
                                           │    Code session (memory)    │
                                           │  • CLAUDE.md + skills       │
                                           └─────────────┬──────────────┘
-                                                        │ MCP
+                                                        │ MCP (.mcp.json)
                             ┌───────────────────────────┼───────────────────────┐
                             ▼                           ▼                       ▼
-                     linear tools            MCP gateway / aggregator     your other
-                  (built in, no setup)      (.mcp.json → many servers)    MCP servers
+                   MCP gateway / aggregator      Linear MCP server         your other
+                   (front many servers)         (optional, add it)        MCP servers
 ```
 
 ## How it works
@@ -40,16 +41,19 @@ pattern applies.
   single Claude Code conversation (via `--resume`). Ticket #42 can be answered
   with what Claude learned on ticket #7. The session id is persisted, so restarts
   and redeploys keep the thread.
-- **Linear is a built-in tool.** The agent gets its Linear tools from Linear's
-  own [official hosted MCP server](https://linear.app/docs/mcp)
-  (`https://mcp.linear.app/mcp`), wired in via `--mcp-config`. The same
-  `LINEAR_API_TOKEN` is sent as a bearer credential, so there's no extra
-  container to run and the tool surface always tracks Linear's own. (Point
-  `LINEAR_MCP_URL` at a proxy or the legacy `/sse` endpoint to override.)
-- **You bring the rest.** Point `.mcp.json` at an
-  [MCP gateway/aggregator](https://github.com/domdomegg/mcp-aggregator) or list
-  servers directly, and Claude can reach your docs, databases, CI, CRM — anything
-  with an MCP server.
+- **Two clean halves: the harness and the tools.** The daemon's
+  `LINEAR_API_TOKEN` does exactly one job — a deterministic poll/post loop that
+  reads new comments and posts replies over Linear's GraphQL API. That's the
+  harness: plain glue code, no agent involved.
+- **The agent's tools are all MCP.** Everything Claude can *do* comes from
+  `.mcp.json`: ideally a single
+  [MCP gateway/aggregator](https://github.com/domdomegg/mcp-aggregator) fronting
+  many upstream servers, but you can also list individual servers directly — your
+  docs, databases, CI, CRM. Want Claude to act inside Linear as a tool (search,
+  create, update)? Add Linear's
+  [official hosted MCP server](https://linear.app/docs/mcp) as one of those
+  servers — ready to copy in `.mcp.example.json`. The tool layer stays separate
+  from the harness above: the daemon owns the token; the agent owns `.mcp.json`.
 - **Behavior is editable.** `CLAUDE.md` is the operating rulebook and
   `.claude/skills/` holds reusable procedures. A bundled `strategy-context`
   skill teaches Claude to answer strategy questions about technical work by
@@ -88,10 +92,10 @@ cd linear-mcp-client-bridge
 
 In Linear: **Settings → Security & access → Personal API keys → New key**
 (see Linear's [API docs](https://linear.app/docs/api-and-webhooks) if the menu
-has moved). Copy the value — it looks like `lin_api_xxxxxxxxxxxxxxxx`. This
-single key does double duty: it
-drives the poll loop *and* is the bearer credential for Linear's hosted MCP
-tools.
+has moved). Copy the value — it looks like `lin_api_xxxxxxxxxxxxxxxx`. The daemon
+uses this key for one thing: polling Linear for new comments and posting replies.
+(Giving the agent Linear *tools* is a separate, optional step — that's the MCP
+layer, covered in [Giving the agent more powers](#giving-the-agent-more-powers-mcp-servers).)
 
 > The bridge acts **as the user who owns this key** — it reads what that user can
 > read and comments under their name. For anything beyond a quick trial, create a
@@ -115,23 +119,16 @@ you already use Claude Code locally via `claude login` (a Pro/Max plan), the
 bridge can reuse that login instead of an API key — leave `ANTHROPIC_API_KEY`
 unset.
 
-- **Running locally** (the [Local development](#local-development) flow,
-  `npm run dev` / `npm run smoke`): nothing to do — the CLI finds your
-  `~/.claude` login automatically.
-- **Running in Docker:** the container is a clean environment with no login of
-  its own, so mount your host credentials into it. Add this to the `bridge`
-  service in `docker-compose.yml`:
+There's nothing to set up: the default `docker-compose.yml` already mounts your
+host `~/.claude` into the container (`${HOME}/.claude:/home/node/.claude`), and
+running locally (`npm run dev` / `npm run smoke`) finds `~/.claude` directly. The
+mount is harmless if you picked Option A — an `ANTHROPIC_API_KEY` takes precedence.
 
-  ```yaml
-      volumes:
-        - bridge-state:/data
-        - ~/.claude:/home/node/.claude   # <-- share your host claude login
-  ```
-
-  The container runs as the `node` user (uid 1000); make sure your host
-  `~/.claude` is readable/writable by that uid (on most single-user Linux/macOS
-  setups it already is). The CLI refreshes its token in place, so mount it
-  read-write. If you'd rather not share the host login, use Option A.
+> The container runs as the `node` user (uid 1000), so your host `~/.claude` must
+> be readable/writable by that uid (true on most single-user Linux/macOS setups).
+> The CLI refreshes its token in place, which is why it's mounted read-write.
+> Using plain `docker run` instead of Compose? Add the mount yourself (shown in
+> the [Plain Docker](#plain-docker-no-compose) snippet below).
 
 ### 5. Configure secrets
 
@@ -172,7 +169,8 @@ docker run -d --name linear-bridge \
   --env-file .env \
   -v linear-bridge-state:/data \
   linear-mcp-client-bridge
-  # For ambient login (step 4, Option B) add: -v ~/.claude:/home/node/.claude
+  # For ambient login (Option B) add: -v ~/.claude:/home/node/.claude
+  # (Compose mounts this for you; plain `docker run` does not.)
 ```
 
 ## Configuration
@@ -182,8 +180,7 @@ All configuration is environment variables (see `.env.example`):
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | | — | Anthropic API key. Optional: if unset, the bundled `claude` CLI uses the host's own login (a Claude subscription via `claude login`, or an `ANTHROPIC_API_KEY` already in the environment). |
-| `LINEAR_API_TOKEN` | ✅ | — | Linear personal API key (`lin_api_…`). Drives the poll loop *and* is sent as the bearer credential to Linear's MCP server. |
-| `LINEAR_MCP_URL` | | `https://mcp.linear.app/mcp` | Linear's hosted MCP server, giving the agent its Linear tools. Override only for a proxy or the legacy `/sse` endpoint. |
+| `LINEAR_API_TOKEN` | ✅ | — | Linear personal API key (`lin_api_…`). The daemon uses it to poll for new comments and post replies. (If you also add Linear's MCP server to `.mcp.json`, the same key can authenticate it — but that's the separate tool layer.) |
 | `POLL_INTERVAL_SECONDS` | | `20` | Seconds between Linear polls. |
 | `AGENT_MODEL` | | `claude-opus-4-8` | Model the agent runs on. |
 | `AGENT_PERMISSION_MODE` | | `bypassPermissions` | Claude Code permission mode. See **Security**. |
@@ -230,14 +227,32 @@ and Claude gains those tools with no change here.
 }
 ```
 
+…or Linear's own hosted server, so Claude can act inside Linear as a tool
+(search, create, and update issues). This is the agent's tool layer — distinct
+from the `LINEAR_API_TOKEN` the daemon already uses to poll and post, even though
+the same credential is convenient here:
+
+```jsonc
+{
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "headers": { "Authorization": "Bearer ${LINEAR_API_TOKEN}" }
+    }
+  }
+}
+```
+
 `${VAR}` and `${VAR:-default}` are expanded from the environment, so secrets stay
 in `.env`, not in the committed file. Anything you add shows up to Claude as
 `mcp__<server>__<tool>` tools.
 
-> The default `.mcp.json` ships with a `gateway` entry pointing at
-> `localhost:3000`. If you don't run a gateway, either set `MCP_AGGREGATOR_URL`
-> to a real one or delete that entry — Claude still has the built-in Linear tools
-> and will simply log that the gateway is unreachable.
+> The default `.mcp.json` ships with a single `gateway` entry pointing at
+> `localhost:3000`. The agent has no tools until `.mcp.json` lists at least one
+> reachable server, so if you don't run a gateway, set `MCP_AGGREGATOR_URL` to a
+> real one or replace that entry with the individual servers you want. To give
+> the agent Linear tools, copy the `linear` block from `.mcp.example.json`.
 
 ## Teaching it new behaviors (CLAUDE.md + skills)
 
@@ -253,9 +268,10 @@ in `.env`, not in the committed file. Anything you add shows up to Claude as
 - **`sentinel-check`** — a bundled live demo / self-test skill. Comment
   *"run the sentinel check"* on any ticket and the agent loads the skill, reads
   an unguessable pass-phrase off disk, and replies with it — proof that a real
-  `claude` agent (not a canned response) handled the comment. Ask it to also
-  fetch the issue title and one reply exercises both halves of the loop: local
-  skill loading **and** the official hosted Linear MCP server.
+  `claude` agent (not a canned response) handled the comment. With Linear's MCP
+  server configured in `.mcp.json`, ask it to also fetch the issue title and one
+  reply exercises both layers at once: local skill loading **and** an MCP tool
+  call.
 
 ## Security — read before deploying
 
@@ -347,7 +363,7 @@ src/
   config.ts            environment configuration
   linear.ts            minimal Linear GraphQL client (native fetch)
   session.ts           spawns `claude -p`, one resumable session (--resume);
-                       writes the Linear MCP config (official hosted server)
+                       hands it the operator's .mcp.json as its tool surface
   prompt.ts            builds the per-comment agent prompt (shared)
   filter.ts            pure comment classification (self/dup/scope/handle)
   state.ts             durable session id + poll cursor
