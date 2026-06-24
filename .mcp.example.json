@@ -1,0 +1,36 @@
+{
+  "_comment": "Reference for .mcp.json — the agent's entire tool surface. Copy the servers you want into .mcp.json. Shown: an MCP gateway/aggregator over HTTP (the ideal — front many upstream servers behind one endpoint), plus individual servers listed directly (Linear's official hosted server, a stdio server, an authenticated HTTP server). Anything you add becomes mcp__<name>__<tool> tools the agent can call. Use ${ENV_VAR} so secrets stay in the environment, not in this file. This layer is independent of the daemon's LINEAR_API_TOKEN, which only drives the poll/post harness.",
+
+  "mcpServers": {
+    "gateway": {
+      "type": "http",
+      "url": "${MCP_AGGREGATOR_URL:-http://localhost:3000/mcp}"
+    },
+
+    "linear": {
+      "_comment": "Linear's official hosted MCP server — gives the agent Linear tools (search/create/update issues, comments, projects). Authenticate it with any Linear credential; reusing the daemon's LINEAR_API_TOKEN is convenient. This is the agent's tool layer, separate from the poll/post harness that also uses that token.",
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LINEAR_API_TOKEN}"
+      }
+    },
+
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+
+    "docs": {
+      "type": "http",
+      "url": "${COMPANY_DOCS_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${COMPANY_DOCS_MCP_TOKEN}"
+      }
+    }
+  }
+}

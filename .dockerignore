@@ -1,0 +1,12 @@
+node_modules
+dist
+state
+data
+.git
+.gitignore
+*.log
+.npm-cache
+.env
+.env.*
+!.env.example
+README.md

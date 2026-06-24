@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gateway": {
+      "type": "http",
+      "url": "${MCP_AGGREGATOR_URL:-http://localhost:3000/mcp}"
+    }
+  }
+}
