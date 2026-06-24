@@ -131,11 +131,11 @@ mount is harmless if you picked Option A — an `ANTHROPIC_API_KEY` takes preced
 > the [Plain Docker](#plain-docker-no-compose) snippet below).
 
 > **⚠️ macOS + Docker: Option B does not work — use Option A.** This one is easy
-> to miss because it fails silently. On macOS, `claude login` stores its token in
-> the **login Keychain**, *not* in `~/.claude/.credentials.json`. So the
-> `~/.claude` bind mount carries no credential into the (Linux) container, the
-> bundled `claude` starts up logged-out, and every turn errors with an
-> authentication failure. Two ways around it on a Mac:
+> to miss. On macOS, `claude login` stores its subscription token in the **login
+> Keychain**, *not* in `~/.claude/.credentials.json`. So even if the `~/.claude`
+> bind mount copies a `.credentials.json` into the (Linux) container, it carries
+> no usable **Anthropic login** — the bundled `claude` starts up logged-out and
+> every turn errors with an authentication failure. Two ways around it on a Mac:
 >
 > - **Set `ANTHROPIC_API_KEY` (Option A).** This is the recommended path for
 >   Docker on macOS and is fully self-contained in the container.

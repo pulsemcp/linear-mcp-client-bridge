@@ -30,10 +30,11 @@ services:
       # have no ~/.claude Docker just creates an empty dir. The container runs as
       # uid 1000 (node), so this path must be readable/writable by that uid.
       #
-      # macOS caveat: `claude login` stores its token in the macOS Keychain, not
-      # in ~/.claude, so this mount carries no credential into the Linux
-      # container. On macOS use Option A (set ANTHROPIC_API_KEY) or run locally
-      # with npm instead. (Linux hosts keep the login in ~/.claude — no issue.)
+      # macOS caveat: `claude login` stores its subscription token in the macOS
+      # Keychain, not in ~/.claude, so this mount carries no usable Anthropic
+      # login into the Linux container. On macOS use Option A (set
+      # ANTHROPIC_API_KEY) or run locally with npm instead. (Linux hosts keep the
+      # login in ~/.claude — no issue.)
       - ${HOME}/.claude:/home/node/.claude
 
 volumes:
