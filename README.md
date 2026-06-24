@@ -173,6 +173,43 @@ docker run -d --name linear-bridge \
   # (Compose mounts this for you; plain `docker run` does not.)
 ```
 
+## Live activity view
+
+The bridge ships with a built-in, zero-dependency web view of everything it's
+doing — polls, the comment it picked up, **each message and tool call Claude
+works through**, and the reply it posts. It's the easiest way to watch the agent
+think, and it's made for a split-screen demo: Linear on one side, this on the
+other.
+
+It's **on by default**. Once the daemon is running, open:
+
+```
+http://localhost:8787
+```
+
+![Live activity feed](https://storage.googleapis.com/remote-filesystem-tadas/screenshots/linear-bridge-viz/activity-feed-tail.png)
+
+How it works: the daemon runs `claude -p --output-format stream-json`, so the
+CLI emits one JSON object per line *as it works*. The bridge parses that stream
+live and pushes a normalized view to the browser over
+[Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events).
+A late-joining browser still gets the recent backlog from an in-memory ring
+buffer, so you're never staring at a blank screen.
+
+**Preview it without any credentials.** A scripted demo replays a realistic run
+(a coupon-bug ticket: comment → tool calls → reply) so you can see exactly what
+the split-screen recording will look like, or rehearse it:
+
+```bash
+npm run viz:demo            # play the scripted run once, then keep serving
+npm run viz:demo -- --loop  # replay on a loop
+# then open http://localhost:8787
+```
+
+Turn it off or move it with `VIZ_ENABLED` / `VIZ_PORT` (see
+[Configuration](#configuration)). In Docker the port is published by
+`docker-compose.yml`.
+
 ## Configuration
 
 All configuration is environment variables (see `.env.example`):
@@ -187,6 +224,9 @@ All configuration is environment variables (see `.env.example`):
 | `AGENT_ALLOWED_TOOLS` | | _(all)_ | Comma-separated allowlist of tools, e.g. `mcp__linear__*,Read`. When set, only these are usable. |
 | `AGENT_DISALLOWED_TOOLS` | | _(none)_ | Comma-separated blocklist of tools, e.g. `Bash,Write,Edit`. Applied on top of the allowlist. |
 | `LINEAR_TEAM_KEYS` | | _(all)_ | Comma-separated team keys to limit scope, e.g. `ENG,OPS`. |
+| `VIZ_ENABLED` | | `true` | Serve the [live activity view](#live-activity-view). Set to `false` to disable it. |
+| `VIZ_PORT` | | `8787` | Port the activity view listens on (and the published port in `docker-compose.yml`). |
+| `VIZ_HOST` | | `0.0.0.0` | Interface the activity view binds to. Defaults to all interfaces so the container's published port is reachable; set `127.0.0.1` to keep the (unauthenticated) feed local-only. |
 | `MCP_AGGREGATOR_URL` | | `http://localhost:3000/mcp` | URL the default `.mcp.json` gateway entry points at. |
 | `STATE_DIR` | | `./state` (code) / `/data` (Docker image) | Where the session id + poll cursor are stored. The Docker image sets `/data` and mounts it as a volume. |
 | `CLAUDE_BIN` | | _(bundled)_ | Path to the `claude` binary. Defaults to the one bundled with the `@anthropic-ai/claude-code` dependency; override only if you want a different CLI build. |
@@ -362,11 +402,18 @@ src/
   smoke.ts             one-shot end-to-end runner (`npm run smoke`)
   config.ts            environment configuration
   linear.ts            minimal Linear GraphQL client (native fetch)
-  session.ts           spawns `claude -p`, one resumable session (--resume);
-                       hands it the operator's .mcp.json as its tool surface
+  session.ts           spawns `claude -p` (stream-json), one resumable session
+                       (--resume); hands it the operator's .mcp.json as tools,
+                       and streams each message/tool call to the activity hub
+  activity.ts          in-process activity event hub (ring buffer + pub/sub)
+  web.ts               zero-dep HTTP + SSE server for the live activity view
+  demo-events.ts       scripted demo run for previews/recordings
+  viz-demo.ts          `npm run viz:demo` — replay the demo without credentials
   prompt.ts            builds the per-comment agent prompt (shared)
   filter.ts            pure comment classification (self/dup/scope/handle)
   state.ts             durable session id + poll cursor
+public/
+  index.html        the live activity view (vanilla JS, dark theme, SSE)
 CLAUDE.md         agent operating rules (incl. security)
 .claude/skills/   bundled skills (strategy-context, sentinel-check demo)
 .mcp.json         MCP servers the agent can use (edit to extend)

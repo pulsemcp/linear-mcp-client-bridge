@@ -14,7 +14,8 @@ FROM node:22-slim AS runtime
 ENV NODE_ENV=production \
     HOME=/home/node \
     STATE_DIR=/data \
-    PROJECT_ROOT=/app
+    PROJECT_ROOT=/app \
+    VIZ_PORT=8787
 
 WORKDIR /app
 
@@ -29,11 +30,17 @@ COPY --from=build /app/dist ./dist
 COPY CLAUDE.md .mcp.json ./
 COPY .claude ./.claude
 
+# Static assets for the live activity web view.
+COPY public ./public
+
 # Persistent state (session id + poll cursor) lives on a mounted volume.
 RUN mkdir -p /data && chown -R node:node /app /data /home/node
 VOLUME ["/data"]
 
 # Claude Code refuses to bypass permissions as root, so run unprivileged.
 USER node
+
+# Live activity web view.
+EXPOSE 8787
 
 CMD ["node", "dist/index.js"]

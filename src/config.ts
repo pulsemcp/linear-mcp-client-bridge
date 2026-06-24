@@ -39,6 +39,16 @@ export interface Config {
    * (e.g. "ENG,OPS"). Empty means "every team the token can see".
    */
   teamKeys: string[];
+  /** Serve the live activity web view. */
+  vizEnabled: boolean;
+  /** Port the activity web view listens on. */
+  vizPort: number;
+  /**
+   * Interface the activity view binds to. Defaults to `0.0.0.0` so the
+   * container's published port is reachable; set `127.0.0.1` to keep the
+   * (unauthenticated) feed visible only on the local machine.
+   */
+  vizHost: string;
 }
 
 /** Parse a comma-separated env value into a trimmed, non-empty list. */
@@ -99,5 +109,10 @@ export function loadConfig(): Config {
     stateDir: process.env.STATE_DIR?.trim() || path.join(projectRoot, "state"),
     projectRoot,
     teamKeys: splitList(process.env.LINEAR_TEAM_KEYS).map((s) => s.toUpperCase()),
+    // The live activity view is on by default — it's the easiest way to see
+    // what the daemon is doing. Set VIZ_ENABLED=false to turn it off.
+    vizEnabled: (process.env.VIZ_ENABLED?.trim() || "true").toLowerCase() !== "false",
+    vizPort: Number(process.env.VIZ_PORT) || 8787,
+    vizHost: process.env.VIZ_HOST?.trim() || "0.0.0.0",
   };
 }
